@@ -12,9 +12,9 @@ from pathlib import Path
 from typing import Annotated, TypedDict, Literal
 from dotenv import load_dotenv
 
-from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage, SystemMessage, BaseMessage, ToolMessage
 from langchain_core.tools import tool
+from langchain_openai import ChatOpenAI
 from langgraph.graph import StateGraph, END, START
 from langgraph.graph.message import add_messages
 from langgraph.checkpoint.memory import MemorySaver
@@ -132,8 +132,8 @@ You are a focused AI software engineer whose only mission is to help build, impr
 - Backend / Auth / Database: Supabase
 - Version Control: GitHub
 - Deployment: Vercel
-- AI: Google Gemini API
-- Future agent layer: LangGraph + Gemini
+- AI: OpenRouter (OpenAI-compatible)
+- Future agent layer: LangGraph + OpenRouter
 
 ### Your Current Capabilities
 1. Generate clean, modern, production-ready code
@@ -170,17 +170,25 @@ class AgentState(TypedDict):
 # 4. LLM + Tools
 # ------------------------------------------------------------
 def get_llm():
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
+    provider = os.getenv("PROVIDER", "openrouter").strip().lower()
+    if provider != "openrouter":
         raise ValueError(
-            "GEMINI_API_KEY not found.\n"
-            "Create a .env file and add your key from https://aistudio.google.com/app/apikey"
+            "Unsupported provider. Set PROVIDER=openrouter in your .env file."
         )
 
-    llm = ChatGoogleGenerativeAI(
-        model="gemini-2.0-flash",
+    api_key = os.getenv("OPENROUTER_API_KEY")
+    if not api_key:
+        raise ValueError(
+            "OPENROUTER_API_KEY not found.\n"
+            "Create a .env file and add your key from https://openrouter.ai/keys"
+        )
+
+    model = os.getenv("MODEL", "qwen/qwen3-coder:free")
+    llm = ChatOpenAI(
+        model=model,
         temperature=0.3,
-        google_api_key=api_key,
+        api_key=api_key,
+        base_url="https://openrouter.ai/api/v1",
     )
     return llm.bind_tools(TOOLS)
 
