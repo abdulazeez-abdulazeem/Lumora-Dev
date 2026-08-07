@@ -89,7 +89,8 @@ body {
 .app {
   display: flex;
   height: 100dvh;
-  width: 100vw;
+  width: 100%;
+  max-width: 100%;
   position: relative;
   overflow: hidden;
   z-index: 2;
@@ -1136,7 +1137,8 @@ body::after {
   z-index: 0;
 }
 
-.app { position: relative; z-index: 1; }
+/* Keep .app above #darkveil-overlay (z-index 1) */
+.app { position: relative; z-index: 2; }
 
 /* ─── Sidebar Tabs ──────────────────────────────────────────────── */
 .sidebar-tabs {
@@ -1937,4 +1939,199 @@ body::after {
 }
 .terminal-input::selection {
   background: rgba(139,92,246,0.3);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   RESPONSIVE / MOBILE (additive — preserves desktop rules above)
+   Fixes: sidebar min-width eating flex space, 100vw overflow, app under overlay,
+   full-width main on small screens, touch-friendly controls.
+   ═══════════════════════════════════════════════════════════════════════════ */
+@media (max-width: 768px) {
+  :root {
+    --sidebar-w: min(280px, 86vw);
+  }
+
+  html, body {
+    max-width: 100%;
+    overflow-x: hidden;
+  }
+
+  body {
+    min-height: 100dvh;
+  }
+
+  .app {
+    width: 100%;
+    max-width: 100%;
+    height: 100dvh;
+    height: 100svh;
+    flex-direction: row;
+    overflow: hidden;
+    z-index: 2;
+  }
+
+  .sidebar {
+    position: fixed !important;
+    top: 0;
+    left: 0;
+    height: 100dvh;
+    height: 100svh;
+    width: min(280px, 86vw) !important;
+    min-width: 0 !important;
+    max-width: 86vw;
+    transform: translateX(-105%);
+    box-shadow: 4px 0 40px rgba(0, 0, 0, 0.55);
+    z-index: 200;
+    padding-top: max(12px, env(safe-area-inset-top));
+    padding-bottom: max(12px, env(safe-area-inset-bottom));
+  }
+
+  .sidebar.open {
+    transform: translateX(0);
+  }
+
+  .sidebar-close {
+    display: flex !important;
+  }
+
+  .menu-btn {
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
+    background: none;
+    border: none;
+    color: var(--text-2);
+    cursor: pointer;
+    padding: 8px;
+    border-radius: 8px;
+    min-width: 40px;
+    min-height: 40px;
+  }
+
+  .sidebar-overlay {
+    z-index: 150;
+  }
+
+  .main-wrap {
+    flex: 1 1 100% !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+  }
+
+  .main {
+    flex: 1 1 auto;
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .topnav {
+    gap: 4px;
+    padding-left: 8px;
+    padding-right: 8px;
+    flex-wrap: nowrap;
+  }
+
+  .nav-brand {
+    position: static;
+    transform: none;
+    font-size: 14px;
+  }
+
+  .messages {
+    padding: 12px 10px 8px;
+  }
+
+  .input-area {
+    padding: 8px 10px max(10px, env(safe-area-inset-bottom));
+  }
+
+  .msg-bubble,
+  .msg-content {
+    max-width: 100% !important;
+  }
+
+  .welcome {
+    padding: 24px 16px;
+    min-height: calc(100dvh - var(--nav-h) - 120px);
+  }
+
+  .welcome-glow {
+    width: min(320px, 90vw);
+    height: min(320px, 90vw);
+  }
+
+  .welcome-title {
+    font-size: clamp(22px, 7vw, 32px);
+  }
+
+  .suggestion-grid {
+    grid-template-columns: 1fr;
+    max-width: 100%;
+  }
+
+  .suggestion-chip {
+    width: 100%;
+  }
+
+  .code-viewer,
+  .preview-panel {
+    width: 100% !important;
+    max-width: 100% !important;
+    left: 0 !important;
+    right: 0 !important;
+  }
+
+  .modal {
+    max-width: min(420px, calc(100vw - 24px));
+    margin: 0 auto;
+  }
+
+  .modal-overlay {
+    padding: 12px;
+    align-items: flex-end;
+  }
+
+  @media (max-height: 700px) {
+    .modal-overlay {
+      align-items: center;
+    }
+  }
+
+  .db-layout {
+    flex-direction: column;
+  }
+
+  .db-sidebar {
+    width: 100%;
+    max-height: 40%;
+    border-right: none;
+    border-bottom: 1px solid var(--glass-border);
+  }
+
+  .providers-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 480px) {
+  .topnav .nav-actions button span,
+  .nav-label {
+    display: none;
+  }
+
+  .input-hint {
+    display: none;
+  }
+
+  .welcome-sub {
+    font-size: 13px;
+    max-width: 100%;
+  }
+
+  .sidebar-tab {
+    font-size: 11px;
+    padding: 6px 4px;
+  }
 }
