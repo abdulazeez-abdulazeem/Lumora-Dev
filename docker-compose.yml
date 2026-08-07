@@ -1,0 +1,28 @@
+# Lumora Dev v4.0 — local Docker Compose
+# Usage: docker compose up --build
+
+services:
+  lumora:
+    build: .
+    image: lumora-dev:v4.0
+    ports:
+      - "8000:8000"
+      - "5000:5000"
+    environment:
+      LUMORA_BIND: "0.0.0.0"
+      PORT: "8000"
+      PROVIDER: "${PROVIDER:-openrouter}"
+      OPENROUTER_API_KEY: "${OPENROUTER_API_KEY:-}"
+      MODEL: "${MODEL:-cohere/north-mini-code:free}"
+    volumes:
+      - lumora_data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/system/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+
+volumes:
+  lumora_data:

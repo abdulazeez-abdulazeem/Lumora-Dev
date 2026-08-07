@@ -1,0 +1,17 @@
+.git
+.github
+.env
+.lumora-secret.key
+.lumora-auth.json
+.pytest_cache
+__pycache__
+*.pyc
+.venv
+venv
+node_modules
+.DS_Store
+.local
+.agents
+apps/lumora_dev_app/.dart_tool
+apps/lumora_dev_app/build
+*.zip

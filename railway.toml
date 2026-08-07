@@ -1,0 +1,9 @@
+# Railway — optional config for Lumora Dev v4.0
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+healthcheckPath = "/system/health"
+healthcheckTimeout = 30
+restartPolicyType = "ON_FAILURE"

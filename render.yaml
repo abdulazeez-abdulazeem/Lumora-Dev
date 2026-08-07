@@ -1,0 +1,19 @@
+# Render Blueprint — free web service for Lumora Dev v4.0
+services:
+  - type: web
+    name: lumora-dev
+    runtime: docker
+    plan: free
+    autoDeploy: true
+    healthCheckPath: /system/health
+    envVars:
+      - key: LUMORA_BIND
+        value: "0.0.0.0"
+      - key: PORT
+        value: "8000"
+      - key: PROVIDER
+        value: openrouter
+      - key: MODEL
+        value: "cohere/north-mini-code:free"
+      - key: OPENROUTER_API_KEY
+        sync: false
