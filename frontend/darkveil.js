@@ -135,7 +135,17 @@ void main() {
   // Pixel ratio (reduced on mobile)
   function dpr() {
     const isMobile = window.matchMedia('(max-width: 768px)').matches;
-    return isMobile ? Math.min(window.devicePixelRatio || 1, 1) : Math.min(window.devicePixelRatio || 1, 2);
+    // Mobile: half resolution (or lower) — biggest GPU win without killing look
+    if (isMobile) return Math.min(window.devicePixelRatio || 1, 1) * 0.6;
+    return Math.min(window.devicePixelRatio || 1, 2);
+  }
+
+  function isMobileViewport() {
+    return window.matchMedia('(max-width: 768px)').matches;
+  }
+
+  function prefersReducedMotion() {
+    return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   }
 
   /* ─── CSS fallback (headless / no-WebGL environments) ───────────── */
@@ -257,6 +267,18 @@ void main() {
     gl.uniform1f(uHue,   CFG.hueShift / 360.0);
     gl.uniform1f(uNoise, CFG.noiseIntensity);
 
+
+  /* MOBILE_PERF: quieter animation defaults on phones */
+  if (window.matchMedia('(max-width: 768px)').matches) {
+    CFG.speed = Math.min(CFG.speed, 0.18);
+    CFG.warpAmount = Math.min(CFG.warpAmount, 0.7);
+    CFG.noiseIntensity = Math.min(CFG.noiseIntensity, 0.01);
+    targetSpeed = CFG.speed;
+    targetWarp = CFG.warpAmount;
+    currentSpeed = CFG.speed;
+    currentWarp = CFG.warpAmount;
+  }
+
     resize();
     startLoop();
   }
@@ -277,11 +299,22 @@ void main() {
   /* ─── Render loop ────────────────────────────────────────────────── */
   function lerp(a, b, t) { return a + (b - a) * t; }
 
+  let _frameSkip = 0;
+
   function frame() {
     if (!gl) return;
 
+    /* Mobile: render every 2nd frame (~30fps) to cut GPU cost */
+    if (isMobileViewport()) {
+      _frameSkip ^= 1;
+      if (_frameSkip === 0) {
+        rafId = requestAnimationFrame(frame);
+        return;
+      }
+    }
+
     /* Smooth lerp toward target speed/warp */
-    const lerpRate = 0.025;
+    const lerpRate = isMobileViewport() ? 0.04 : 0.025;
     currentSpeed = lerp(currentSpeed, targetSpeed, lerpRate);
     currentWarp  = lerp(currentWarp,  targetWarp,  lerpRate);
 

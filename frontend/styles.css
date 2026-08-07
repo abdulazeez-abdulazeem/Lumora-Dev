@@ -86,12 +86,22 @@ body {
 }
 
 /* ─── App Shell ─────────────────────────────────────────────────── */
-.app {
-  display: flex;
-  height: 100dvh;
+html, body {
   width: 100%;
   max-width: 100%;
-  position: relative;
+  min-height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+.app {
+  display: flex;
+  /* Fixed inset forces full viewport even when body width collapses */
+  position: fixed;
+  inset: 0;
+  width: auto;
+  height: auto;
+  max-width: none;
   overflow: hidden;
   z-index: 2;
   flex-direction: row;
@@ -1942,44 +1952,45 @@ body::after {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   RESPONSIVE / MOBILE (additive — preserves desktop rules above)
-   Fixes: sidebar min-width eating flex space, 100vw overflow, app under overlay,
-   full-width main on small screens, touch-friendly controls.
+   RESPONSIVE / MOBILE v2 — full viewport shell + drawer + lighter effects
+   Desktop rules above are preserved; this section only applies ≤768px.
    ═══════════════════════════════════════════════════════════════════════════ */
 @media (max-width: 768px) {
   :root {
-    --sidebar-w: min(280px, 86vw);
+    --sidebar-w: 280px;
+    --blur: blur(8px);
   }
 
   html, body {
+    width: 100%;
     max-width: 100%;
-    overflow-x: hidden;
-  }
-
-  body {
-    min-height: 100dvh;
+    overflow: hidden;
   }
 
   .app {
-    width: 100%;
-    max-width: 100%;
-    height: 100dvh;
-    height: 100svh;
-    flex-direction: row;
-    overflow: hidden;
-    z-index: 2;
+    position: fixed !important;
+    inset: 0 !important;
+    width: auto !important;
+    height: auto !important;
+    max-width: none !important;
+    min-width: 0 !important;
+    display: flex !important;
+    flex-direction: row !important;
+    z-index: 2 !important;
   }
 
+  /* Drawer only — never reserve horizontal flex space */
   .sidebar {
     position: fixed !important;
     top: 0;
     left: 0;
-    height: 100dvh;
-    height: 100svh;
+    bottom: 0;
+    height: auto !important;
     width: min(280px, 86vw) !important;
     min-width: 0 !important;
-    max-width: 86vw;
-    transform: translateX(-105%);
+    max-width: 86vw !important;
+    flex: none !important;
+    transform: translate3d(-105%, 0, 0);
     box-shadow: 4px 0 40px rgba(0, 0, 0, 0.55);
     z-index: 200;
     padding-top: max(12px, env(safe-area-inset-top));
@@ -1987,63 +1998,69 @@ body::after {
   }
 
   .sidebar.open {
-    transform: translateX(0);
+    transform: translate3d(0, 0, 0);
   }
 
-  .sidebar-close {
-    display: flex !important;
-  }
+  .sidebar-close { display: flex !important; }
 
   .menu-btn {
     display: flex !important;
     align-items: center;
     justify-content: center;
+    min-width: 44px;
+    min-height: 44px;
     background: none;
     border: none;
     color: var(--text-2);
-    cursor: pointer;
     padding: 8px;
     border-radius: 8px;
-    min-width: 40px;
-    min-height: 40px;
   }
 
-  .sidebar-overlay {
-    z-index: 150;
-  }
+  .sidebar-overlay { z-index: 150; }
 
   .main-wrap {
-    flex: 1 1 100% !important;
+    flex: 1 1 auto !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    margin: 0 !important;
+  }
+
+  .main {
     width: 100% !important;
     max-width: 100% !important;
     min-width: 0 !important;
   }
 
-  .main {
-    flex: 1 1 auto;
-    width: 100%;
-    min-width: 0;
-    max-width: 100%;
-  }
-
   .topnav {
-    gap: 4px;
+    width: 100%;
+    max-width: 100%;
     padding-left: 8px;
     padding-right: 8px;
-    flex-wrap: nowrap;
+    gap: 4px;
+    /* Cheaper than heavy blur on mobile GPUs */
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
   }
 
   .nav-brand {
-    position: static;
-    transform: none;
-    font-size: 14px;
+    position: static !important;
+    transform: none !important;
+    left: auto !important;
   }
 
-  .messages {
-    padding: 12px 10px 8px;
+  .messages,
+  .input-wrapper {
+    max-width: 100% !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding-left: 12px;
+    padding-right: 12px;
   }
 
   .input-area {
+    max-width: 100% !important;
+    width: 100% !important;
     padding: 8px 10px max(10px, env(safe-area-inset-bottom));
   }
 
@@ -2054,25 +2071,18 @@ body::after {
 
   .welcome {
     padding: 24px 16px;
-    min-height: calc(100dvh - var(--nav-h) - 120px);
+    width: 100%;
+    max-width: 100%;
   }
 
   .welcome-glow {
-    width: min(320px, 90vw);
-    height: min(320px, 90vw);
-  }
-
-  .welcome-title {
-    font-size: clamp(22px, 7vw, 32px);
+    width: min(280px, 80vw);
+    height: min(280px, 80vw);
   }
 
   .suggestion-grid {
     grid-template-columns: 1fr;
     max-width: 100%;
-  }
-
-  .suggestion-chip {
-    width: 100%;
   }
 
   .code-viewer,
@@ -2084,25 +2094,14 @@ body::after {
   }
 
   .modal {
-    max-width: min(420px, calc(100vw - 24px));
-    margin: 0 auto;
+    max-width: min(420px, calc(100% - 24px));
   }
 
   .modal-overlay {
     padding: 12px;
-    align-items: flex-end;
   }
 
-  @media (max-height: 700px) {
-    .modal-overlay {
-      align-items: center;
-    }
-  }
-
-  .db-layout {
-    flex-direction: column;
-  }
-
+  .db-layout { flex-direction: column; }
   .db-sidebar {
     width: 100%;
     max-height: 40%;
@@ -2110,8 +2109,14 @@ body::after {
     border-bottom: 1px solid var(--glass-border);
   }
 
-  .providers-grid {
-    grid-template-columns: 1fr;
+  /* Lighter decorative effects on mobile */
+  body::before,
+  body::after {
+    opacity: 0.35;
+  }
+
+  .input-container {
+    box-shadow: 0 0 0 1px rgba(139, 92, 246, 0.08), 0 4px 16px rgba(0, 0, 0, 0.35);
   }
 }
 
@@ -2120,18 +2125,16 @@ body::after {
   .nav-label {
     display: none;
   }
+  .input-hint { display: none; }
+  .welcome-sub { font-size: 13px; max-width: 100%; }
+  .sidebar-tab { font-size: 11px; padding: 6px 4px; }
+}
 
-  .input-hint {
-    display: none;
-  }
-
-  .welcome-sub {
-    font-size: 13px;
-    max-width: 100%;
-  }
-
-  .sidebar-tab {
-    font-size: 11px;
-    padding: 6px 4px;
+/* Respect reduced motion system-wide */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
   }
 }
