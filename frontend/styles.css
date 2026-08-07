@@ -2163,3 +2163,43 @@ body::after {
   .terminal-panel { left: 0 !important; right: 0 !important; width: auto !important; }
   .main-wrap { flex: 1 1 100% !important; width: 100% !important; max-width: none !important; }
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   MOBILE_PERF: reduce GPU compositing cost from backdrop-filter / heavy shadows
+   Desktop glass/blur unchanged. Does not alter layout geometry.
+   ═══════════════════════════════════════════════════════════════════════════ */
+@media (max-width: 768px) {
+  :root {
+    --blur: blur(6px);
+  }
+
+  .glass,
+  .topnav,
+  .msg-bubble,
+  .ai-bubble,
+  .input-container,
+  .modal,
+  .code-viewer,
+  .preview-panel,
+  .editor-tab-bar,
+  .terminal-toolbar {
+    backdrop-filter: blur(6px) !important;
+    -webkit-backdrop-filter: blur(6px) !important;
+  }
+
+  /* Soften multi-layer shadows (fill-rate) */
+  .input-container {
+    box-shadow: 0 0 0 1px rgba(139, 92, 246, 0.08), 0 4px 12px rgba(0, 0, 0, 0.3) !important;
+  }
+
+  .send-btn {
+    box-shadow: 0 0 12px rgba(139, 92, 246, 0.25) !important;
+  }
+
+  /* Decorative blobs — static, no continuous paint */
+  body::before,
+  body::after {
+    animation: none !important;
+    opacity: 0.25;
+  }
+}

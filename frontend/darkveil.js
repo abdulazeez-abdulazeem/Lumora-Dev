@@ -36,7 +36,8 @@ void main() { gl_Position = vec4(a_pos, 0.0, 1.0); }
 `;
 
   /* ─── Fragment shader ────────────────────────────────────────────── */
-  const FRAG = `
+  /* Original full-quality shader — desktop path (preserved) */
+  const FRAG_FULL = `
 precision mediump float;
 
 uniform vec2  u_res;
@@ -117,6 +118,78 @@ void main() {
 }
 `;
 
+  /* MOBILE_PERF: lighter shader — fewer fBm octaves, single warp, no grain.
+     Same visual language (dark matte + faint violet), much less GPU cost. */
+  const FRAG_LIGHT = `
+precision mediump float;
+
+uniform vec2  u_res;
+uniform float u_time;
+uniform float u_hue;
+uniform float u_noise;
+uniform float u_speed;
+uniform float u_warp;
+
+vec2 hash2(vec2 p) {
+  p = vec2(dot(p, vec2(127.1, 311.7)),
+           dot(p, vec2(269.5, 183.3)));
+  return -1.0 + 2.0 * fract(sin(p) * 43758.5453);
+}
+
+float gnoise(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  vec2 u = f * f * (3.0 - 2.0 * f);
+  return mix(
+    mix(dot(hash2(i + vec2(0,0)), f - vec2(0,0)),
+        dot(hash2(i + vec2(1,0)), f - vec2(1,0)), u.x),
+    mix(dot(hash2(i + vec2(0,1)), f - vec2(0,1)),
+        dot(hash2(i + vec2(1,1)), f - vec2(1,1)), u.x),
+    u.y);
+}
+
+/* 2 octaves instead of 5 */
+float fbm(vec2 p) {
+  float v = 0.0, a = 0.5;
+  mat2 rot = mat2(0.8776, 0.4794, -0.4794, 0.8776);
+  for (int i = 0; i < 2; i++) {
+    v += a * gnoise(p);
+    p  = rot * p * 2.0 + vec2(100.0);
+    a *= 0.5;
+  }
+  return v;
+}
+
+vec3 hsl2rgb(float h, float s, float l) {
+  vec3 rgb = clamp(abs(mod(h * 6.0 + vec3(0.0, 4.0, 2.0), 6.0) - 3.0) - 1.0,
+                   0.0, 1.0);
+  return l + s * (rgb - 0.5) * (1.0 - abs(2.0 * l - 1.0));
+}
+
+void main() {
+  vec2 uv = gl_FragCoord.xy / u_res;
+  float t  = u_time * u_speed;
+  vec2 p = uv * 2.4;
+
+  /* Single warp domain (was double-warp with 5 fBm calls) */
+  vec2 q;
+  q.x = fbm(p + t * 0.06);
+  q.y = fbm(p + vec2(5.2, 1.3) + t * 0.06);
+  float f = fbm(p + u_warp * 0.7 * q + t * 0.03);
+
+  float brightness = 0.018 + 0.038 * max(f, 0.0);
+  float hue = u_hue + 0.04 * (f - 0.5);
+  float sat  = 0.55 + 0.35 * f;
+  vec3 col = hsl2rgb(hue, sat, brightness);
+
+  /* grain disabled on mobile path (u_noise unused) */
+  gl_FragColor = vec4(col, 1.0);
+}
+`;
+
+  const FRAG = (typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(max-width: 768px)').matches) ? FRAG_LIGHT : FRAG_FULL;
+
+
   /* ─── State ──────────────────────────────────────────────────────── */
   let canvas, gl, prog, buf;
   let uRes, uTime, uHue, uNoise, uSpeed, uWarp;
@@ -133,19 +206,31 @@ void main() {
   let targetWarp   = CFG.warpAmount;
 
   // Pixel ratio (reduced on mobile)
-  function dpr() {
-    const isMobile = window.matchMedia('(max-width: 768px)').matches;
-    // Mobile: half resolution (or lower) — biggest GPU win without killing look
-    if (isMobile) return Math.min(window.devicePixelRatio || 1, 1) * 0.6;
-    return Math.min(window.devicePixelRatio || 1, 2);
-  }
-
   function isMobileViewport() {
     return window.matchMedia('(max-width: 768px)').matches;
   }
 
   function prefersReducedMotion() {
     return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  }
+
+  function isLowEndDevice() {
+    try {
+      const cores = navigator.hardwareConcurrency || 8;
+      const mem = navigator.deviceMemory || 8;
+      return isMobileViewport() && (cores <= 4 || mem <= 4);
+    } catch (e) {
+      return isMobileViewport();
+    }
+  }
+
+  function dpr() {
+    if (!isMobileViewport()) {
+      return Math.min(window.devicePixelRatio || 1, 2);
+    }
+    // Mobile: 0.5× CSS pixels; low-end: 0.35×
+    const cap = isLowEndDevice() ? 0.35 : 0.5;
+    return Math.min(window.devicePixelRatio || 1, 1) * cap;
   }
 
   /* ─── CSS fallback (headless / no-WebGL environments) ───────────── */
@@ -193,6 +278,14 @@ void main() {
     `;
   }
 
+  /* LOW_END_BOOT: skip WebGL on very constrained phones / reduced motion.
+     Original desktop WebGL path is unchanged. */
+  function shouldUseCssFallback() {
+    if (prefersReducedMotion()) return true;
+    if (isLowEndDevice()) return true;
+    return false;
+  }
+
   /* ─── WebGL bootstrap ────────────────────────────────────────────── */
   function compileShader(type, src) {
     const s = gl.createShader(type);
@@ -226,6 +319,12 @@ void main() {
   function init() {
     canvas = document.getElementById('darkveil-canvas');
     if (!canvas) { console.warn('[DarkVeil] canvas not found'); return; }
+
+    /* Low-end / reduced-motion: CSS gradient only (desktop WebGL unchanged) */
+    if (shouldUseCssFallback()) {
+      initCSSFallback();
+      return;
+    }
 
     gl = canvas.getContext('webgl', {
       alpha:                 false,
@@ -269,10 +368,10 @@ void main() {
 
 
   /* MOBILE_PERF: quieter animation defaults on phones */
-  if (window.matchMedia('(max-width: 768px)').matches) {
-    CFG.speed = Math.min(CFG.speed, 0.18);
-    CFG.warpAmount = Math.min(CFG.warpAmount, 0.7);
-    CFG.noiseIntensity = Math.min(CFG.noiseIntensity, 0.01);
+  if (isMobileViewport()) {
+    CFG.speed = Math.min(CFG.speed, 0.12);
+    CFG.warpAmount = Math.min(CFG.warpAmount, 0.55);
+    CFG.noiseIntensity = 0.0;
     targetSpeed = CFG.speed;
     targetWarp = CFG.warpAmount;
     currentSpeed = CFG.speed;
@@ -299,26 +398,26 @@ void main() {
   /* ─── Render loop ────────────────────────────────────────────────── */
   function lerp(a, b, t) { return a + (b - a) * t; }
 
-  let _frameSkip = 0;
+  let _lastDraw = 0;
 
-  function frame() {
+  function frame(now) {
     if (!gl) return;
+    if (typeof now !== 'number') now = performance.now();
 
-    /* Mobile: render every 2nd frame (~30fps) to cut GPU cost */
-    if (isMobileViewport()) {
-      _frameSkip ^= 1;
-      if (_frameSkip === 0) {
-        rafId = requestAnimationFrame(frame);
-        return;
-      }
+    /* Mobile frame budget: ~20 FPS normal, ~12 FPS low-end */
+    const minInterval = isLowEndDevice() ? 80 : (isMobileViewport() ? 50 : 0);
+    if (minInterval > 0 && (now - _lastDraw) < minInterval) {
+      rafId = requestAnimationFrame(frame);
+      return;
     }
+    _lastDraw = now;
 
     /* Smooth lerp toward target speed/warp */
-    const lerpRate = isMobileViewport() ? 0.04 : 0.025;
+    const lerpRate = isMobileViewport() ? 0.05 : 0.025;
     currentSpeed = lerp(currentSpeed, targetSpeed, lerpRate);
     currentWarp  = lerp(currentWarp,  targetWarp,  lerpRate);
 
-    const elapsed = (performance.now() - startTime - pauseOffset) / 1000;
+    const elapsed = (now - startTime - pauseOffset) / 1000;
 
     gl.uniform1f(uTime,  elapsed);
     gl.uniform1f(uSpeed, currentSpeed);
