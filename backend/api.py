@@ -194,8 +194,19 @@ class EditWriteRequest(BaseModel):
 
 
 # ── Routes ─────────────────────────────────────────────────────────────────
-@app.get("/", response_model=HealthResponse)
+@app.get("/health")
 def health():
+    """Platform health probes (Pxxl/Render/Railway/Koyeb/Northflank)."""
+    return {"status": "ok", "service": "Lumora Dev", "version": "4.0.0"}
+
+
+@app.get("/")
+def root():
+    """Serve UI index when present; otherwise JSON service info."""
+    frontend_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "frontend")
+    index = os.path.join(frontend_dir, "index.html")
+    if os.path.isfile(index):
+        return FileResponse(index)
     return {"status": "ok", "service": "Lumora Dev", "version": "4.0.0"}
 
 
@@ -531,42 +542,36 @@ def edits_get(session_id: str):
 
 
 
-# ── Cloud-native: health alias + optional static UI on same PORT ─────────
-@app.get("/health")
-def health_alias():
-    """Simple health for platforms that probe /health."""
-    return {"status": "ok", "service": "lumora-dev", "version": "4.0.0"}
 
 
+# ── Frontend static files (same PORT as API for cloud hosts) ───────────────
 _FRONTEND_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "frontend")
-if os.path.isdir(_FRONTEND_DIR):
-    _index = os.path.join(_FRONTEND_DIR, "index.html")
 
-    @app.get("/")
-    def serve_index():
-        if os.path.isfile(_index):
-            return FileResponse(_index)
-        return {"service": "Lumora Dev API", "docs": "/docs"}
 
-    app.mount("/static-frontend", StaticFiles(directory=_FRONTEND_DIR), name="frontend_static")
-
-    @app.get("/{asset_path:path}")
-    def serve_frontend_asset(asset_path: str):
-        blocked = (
-            "chat", "files", "file", "folder", "terminal", "settings", "git",
-            "github", "activity", "workspaces", "codebase", "db", "auth",
-            "memory", "planner", "edits", "browser", "vision", "knowledge",
-            "multiagent", "system", "deployment", "health", "docs", "openapi.json",
-            "redoc", "static-frontend",
-        )
-        first = asset_path.split("/", 1)[0]
-        if first in blocked:
-            raise HTTPException(status_code=404, detail="Not found")
-        candidate = os.path.normpath(os.path.join(_FRONTEND_DIR, asset_path))
-        if not candidate.startswith(os.path.abspath(_FRONTEND_DIR)):
-            raise HTTPException(status_code=404, detail="Not found")
-        if os.path.isfile(candidate):
-            return FileResponse(candidate)
-        if os.path.isfile(_index):
-            return FileResponse(_index)
+def _frontend_file(name: str):
+    candidate = os.path.normpath(os.path.join(_FRONTEND_DIR, name))
+    if not candidate.startswith(os.path.abspath(_FRONTEND_DIR)):
         raise HTTPException(status_code=404, detail="Not found")
+    if os.path.isfile(candidate):
+        return FileResponse(candidate)
+    raise HTTPException(status_code=404, detail="Not found")
+
+
+@app.get("/styles.css")
+def frontend_styles():
+    return _frontend_file("styles.css")
+
+
+@app.get("/script.js")
+def frontend_script():
+    return _frontend_file("script.js")
+
+
+@app.get("/darkveil.js")
+def frontend_darkveil():
+    return _frontend_file("darkveil.js")
+
+
+@app.get("/favicon.ico")
+def frontend_favicon():
+    return _frontend_file("favicon.ico")
