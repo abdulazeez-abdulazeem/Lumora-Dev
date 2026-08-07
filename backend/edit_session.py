@@ -10,8 +10,22 @@ from pathlib import Path
 from typing import Optional
 
 ROOT = Path(__file__).resolve().parent.parent
-SESSIONS_DIR = ROOT / ".lumora-edits"
-SESSIONS_DIR.mkdir(exist_ok=True)
+
+# Vercel serverless has a read-only deployment FS (/var/task). Prefer project
+# root when writable (local/Docker); otherwise use /tmp. Do not delete the
+# original path choice — only fall back when mkdir fails.
+def _resolve_sessions_dir() -> Path:
+    preferred = ROOT / ".lumora-edits"
+    try:
+        preferred.mkdir(exist_ok=True)
+        return preferred
+    except OSError:
+        # VERCEL / read-only root: keep original preference documented above
+        fallback = Path("/tmp/lumora-edits")
+        fallback.mkdir(parents=True, exist_ok=True)
+        return fallback
+
+SESSIONS_DIR = _resolve_sessions_dir()
 
 
 def _session_path(session_id: str) -> Path:

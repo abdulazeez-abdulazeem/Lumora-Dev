@@ -11,7 +11,12 @@ from backend.browser.browser_manager import get_manager
 logger = logging.getLogger("lumora.browser.screenshots")
 
 SCREENSHOT_DIR = Path(__file__).resolve().parent.parent.parent / "frontend" / "screenshots"
-SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
+try:
+    SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
+except OSError:
+    # VERCEL read-only FS: original path kept above; fall back to /tmp
+    SCREENSHOT_DIR = Path("/tmp") / SCREENSHOT_DIR.name
+    SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def _run(coro, timeout: float = 30.0):

@@ -11,7 +11,12 @@ from typing import Any
 logger = logging.getLogger("lumora.browser.recorder")
 
 RECORD_DIR = Path(__file__).resolve().parent.parent.parent / ".lumora-browser-recordings"
-RECORD_DIR.mkdir(parents=True, exist_ok=True)
+try:
+    RECORD_DIR.mkdir(parents=True, exist_ok=True)
+except OSError:
+    # VERCEL read-only FS: original path kept above; fall back to /tmp
+    RECORD_DIR = Path("/tmp") / RECORD_DIR.name
+    RECORD_DIR.mkdir(parents=True, exist_ok=True)
 
 _current: dict[str, Any] | None = None
 
