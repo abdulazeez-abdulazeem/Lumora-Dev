@@ -11,7 +11,23 @@ from pathlib import Path
 from typing import Optional
 
 ROOT = Path(__file__).resolve().parent.parent
-PLANS_FILE = ROOT / ".lumora-plans.json"
+
+def _writable_data_path(name: str) -> Path:
+    """Prefer project root; on read-only hosts (Vercel /var/task) use /tmp."""
+    preferred = ROOT / name
+    try:
+        preferred.parent.mkdir(parents=True, exist_ok=True)
+        # probe write
+        probe = preferred.parent / ".lumora-write-probe"
+        probe.write_text("ok", encoding="utf-8")
+        probe.unlink(missing_ok=True)
+        return preferred
+    except OSError:
+        fb = Path("/tmp") / name
+        fb.parent.mkdir(parents=True, exist_ok=True)
+        return fb
+
+PLANS_FILE = _writable_data_path(".lumora-plans.json")
 
 
 def _read() -> dict:

@@ -10,7 +10,23 @@ from pathlib import Path
 from typing import Any, Optional
 
 ROOT = Path(__file__).resolve().parent.parent
-MEMORY_FILE = ROOT / ".lumora-memory.json"
+
+def _writable_data_path(name: str) -> Path:
+    """Prefer project root; on read-only hosts (Vercel /var/task) use /tmp."""
+    preferred = ROOT / name
+    try:
+        preferred.parent.mkdir(parents=True, exist_ok=True)
+        # probe write
+        probe = preferred.parent / ".lumora-write-probe"
+        probe.write_text("ok", encoding="utf-8")
+        probe.unlink(missing_ok=True)
+        return preferred
+    except OSError:
+        fb = Path("/tmp") / name
+        fb.parent.mkdir(parents=True, exist_ok=True)
+        return fb
+
+MEMORY_FILE = _writable_data_path(".lumora-memory.json")
 
 _DEFAULT = {
     "architecture": "",
