@@ -81,3 +81,24 @@ docker compose up --build
 
 - Playwright/Chromium is **not** installed in the default image (keeps size small). Uncomment the Playwright lines in `Dockerfile` if browser automation is required in the cloud.
 - Lumora is local-first; cloud deploy is best for API demos. Full agent filesystem/git workflows work best on a persistent VM or local machine.
+
+---
+
+## Playwright / browser dependency (Pxxl & cloud)
+
+`playwright` publishes **platform-specific binary wheels only** (manylinux x86_64/aarch64, macOS, Windows). There is **no** Alpine/`musllinux` wheel and no usable pure-Python sdist for arbitrary platforms.
+
+Cloud builders that are Alpine-based, use a restricted package index, or cannot match those tags fail with:
+
+```text
+ERROR: No matching distribution found for playwright>=1.40.0
+```
+
+**Fix used by this repo:**
+
+| File | Purpose |
+|------|---------|
+| `requirements.txt` | Core API deps (no Playwright) — use on Pxxl / free cloud |
+| `requirements-browser.txt` | Includes Playwright — local dev or Debian/Ubuntu Docker only |
+
+Browser routes already import Playwright **lazily**; the API starts without it. Browser features return an install hint until `requirements-browser.txt` is installed and Chromium is present.

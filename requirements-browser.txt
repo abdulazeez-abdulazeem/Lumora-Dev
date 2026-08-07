@@ -1,0 +1,9 @@
+# Optional browser automation stack.
+# Requires a glibc Linux x86_64 or aarch64 environment (manylinux wheels),
+# macOS, or Windows. Does NOT install on Alpine/musl.
+#
+# After pip install:
+#   python -m playwright install chromium
+#
+-r requirements.txt
+playwright>=1.40.0

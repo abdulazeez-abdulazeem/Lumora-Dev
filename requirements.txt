@@ -9,7 +9,8 @@ uvicorn[standard]>=0.29.0
 httpx>=0.28.0
 pytest>=8.0.0
 cryptography>=42.0.0
-playwright>=1.40.0
-
 Pillow>=10.0.0
+# Browser automation (optional — install via requirements-browser.txt on local/dev
+# or Debian/Ubuntu Docker images only). Not installed by default on cloud builders
+# that lack manylinux wheels (Alpine/musl, restricted mirrors, etc.).
 # pytesseract>=0.3.10  # optional for real OCR
