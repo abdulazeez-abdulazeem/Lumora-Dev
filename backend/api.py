@@ -17,7 +17,13 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
-from langchain_core.messages import HumanMessage
+# Original: from langchain_core.messages import HumanMessage
+try:
+    from langchain_core.messages import HumanMessage
+except Exception:  # VERCEL: allow API/UI boot if langchain not yet resolved
+    HumanMessage = None  # type: ignore
+    logger.warning("langchain_core.messages.HumanMessage unavailable")
+
 
 logger = logging.getLogger("lumora.api")
 
@@ -29,15 +35,41 @@ def _safe_create_agent():
         logger.exception("Agent unavailable at startup: %s", e)
         return None
 
-from backend.files_router import router as files_router
-from backend.git_router import router as git_router
-from backend.db_router import router as db_router
-from backend.browser.browser_router import router as browser_router
-from backend.vision.vision_router import router as vision_router
-from backend.knowledge.knowledge_router import router as knowledge_router
-from backend.multiagent.multiagent_router import router as multiagent_router
-from backend.system.system_router import router as system_router
-from backend.deployment.deployment_router import router as deployment_router
+# Original hard imports (preferred when all subsystems resolve):
+# from backend.files_router import router as files_router
+# from backend.git_router import router as git_router
+# from backend.db_router import router as db_router
+# from backend.browser.browser_router import router as browser_router
+# from backend.vision.vision_router import router as vision_router
+# from backend.knowledge.knowledge_router import router as knowledge_router
+# from backend.multiagent.multiagent_router import router as multiagent_router
+# from backend.system.system_router import router as system_router
+# from backend.deployment.deployment_router import router as deployment_router
+#
+# Soft-import so one optional subsystem cannot block the whole API on Vercel.
+from fastapi import APIRouter as _APIRouter
+
+def _soft_router(label: str, import_path: str):
+    try:
+        mod = __import__(import_path, fromlist=["router"])
+        return mod.router
+    except Exception as e:
+        logger.warning("Router %s unavailable: %s", label, e)
+        r = _APIRouter(prefix=f"/_unavailable/{label}", tags=[label])
+        @r.get("")
+        def _unavail():
+            return {"status": "unavailable", "router": label, "detail": str(e)[:300]}
+        return r
+
+files_router = _soft_router("files", "backend.files_router")
+git_router = _soft_router("git", "backend.git_router")
+db_router = _soft_router("db", "backend.db_router")
+browser_router = _soft_router("browser", "backend.browser.browser_router")
+vision_router = _soft_router("vision", "backend.vision.vision_router")
+knowledge_router = _soft_router("knowledge", "backend.knowledge.knowledge_router")
+multiagent_router = _soft_router("multiagent", "backend.multiagent.multiagent_router")
+system_router = _soft_router("system", "backend.system.system_router")
+deployment_router = _soft_router("deployment", "backend.deployment.deployment_router")
 from backend.orchestrator import (
     create_task, update_task, complete_task,
     parse_agent_response, add_activity, get_activity,
@@ -101,7 +133,10 @@ async def local_auth_middleware(request: Request, call_next):
     path = request.url.path
     if not is_auth_enabled():
         return await call_next(request)
-    if path == "/" or path.startswith("/auth/") or path in ("/docs", "/openapi.json", "/redoc"):
+    if path == "/" or path.startswith("/auth/") or path in (
+        "/docs", "/openapi.json", "/redoc", "/health",
+        "/styles.css", "/script.js", "/darkveil.js", "/favicon.ico",
+    ):
         return await call_next(request)
     token = request.headers.get("X-Lumora-Token") or request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
     if not validate_session(token):
@@ -206,7 +241,7 @@ def root():
     frontend_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "frontend")
     index = os.path.join(frontend_dir, "index.html")
     if os.path.isfile(index):
-        return FileResponse(index)
+        return FileResponse(index, media_type="text/html; charset=utf-8")
     return {"status": "ok", "service": "Lumora Dev", "version": "4.0.0"}
 
 
