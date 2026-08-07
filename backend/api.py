@@ -17,15 +17,16 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+
+# Logger must exist before any try/except that logs (VERCEL import-safety).
+logger = logging.getLogger("lumora.api")
+
 # Original: from langchain_core.messages import HumanMessage
 try:
     from langchain_core.messages import HumanMessage
 except Exception:  # VERCEL: allow API/UI boot if langchain not yet resolved
     HumanMessage = None  # type: ignore
     logger.warning("langchain_core.messages.HumanMessage unavailable")
-
-
-logger = logging.getLogger("lumora.api")
 
 def _safe_create_agent():
     try:
@@ -231,8 +232,15 @@ class EditWriteRequest(BaseModel):
 # ── Routes ─────────────────────────────────────────────────────────────────
 @app.get("/health")
 def health():
-    """Platform health probes (Pxxl/Render/Railway/Koyeb/Northflank)."""
-    return {"status": "ok", "service": "Lumora Dev", "version": "4.0.0"}
+    """Platform health probes (Pxxl/Render/Railway/Koyeb/Northflank/Vercel)."""
+    return {
+        "status": "ok",
+        "service": "Lumora Dev",
+        "version": "4.0.0",
+        "backend_api_loaded": True,
+        "agent_ready": _agent is not None,
+        "chat": "/chat",
+    }
 
 
 @app.get("/")

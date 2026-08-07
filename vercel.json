@@ -3,11 +3,11 @@
   "functions": {
     "app.py": {
       "maxDuration": 60,
-      "includeFiles": "frontend/**"
+      "includeFiles": "{frontend/**,backend/**,agent.py,server.py}"
     },
     "api/index.py": {
       "maxDuration": 60,
-      "includeFiles": "frontend/**"
+      "includeFiles": "{frontend/**,backend/**,agent.py,server.py}"
     }
   }
 }

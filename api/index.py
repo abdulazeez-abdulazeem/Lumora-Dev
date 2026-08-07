@@ -34,11 +34,15 @@ def _frontend_path(name: str) -> str:
 
 @app.get("/health")
 def health():
+    # When backend.api loads successfully, this handler is replaced by that app.
     return {
         "status": "ok",
         "service": "Lumora Dev",
         "version": "4.0.0",
         "runtime": "vercel",
+        "backend_api_loaded": False,
+        "backend_api_error": _BACKEND_LOAD_ERROR,
+        "chat": "/chat",
     }
 
 
@@ -77,12 +81,33 @@ def favicon():
     return FileResponse(_frontend_path("favicon.ico"), media_type="image/x-icon")
 
 
+_BACKEND_LOADED = False
+_BACKEND_LOAD_ERROR = None
 try:
     from backend.api import app as _lumora_app  # noqa: E402
 
     app = _lumora_app
+    _BACKEND_LOADED = True
     logger.info("Loaded backend.api:app for Vercel")
 except Exception as e:
+    _BACKEND_LOAD_ERROR = f"{type(e).__name__}: {e}"
     logger.warning("backend.api not loaded (%s); serving frontend from entrypoint", e)
+
+
+# Fallback chat only if backend.api failed to import (avoids opaque 404).
+# When backend loads, this app object is replaced entirely — do not re-register.
+if not _BACKEND_LOADED:
+    @app.post("/chat")
+    async def chat_fallback(payload: dict):
+        from fastapi.responses import JSONResponse
+        return JSONResponse(
+            status_code=503,
+            content={
+                "detail": "backend.api failed to load on this runtime",
+                "backend_api_error": _BACKEND_LOAD_ERROR,
+                "hint": "Check Vercel function logs and ensure backend/** + agent.py are bundled",
+            },
+        )
+
 
 __all__ = ["app"]

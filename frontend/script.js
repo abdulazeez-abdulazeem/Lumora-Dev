@@ -259,7 +259,7 @@ async function sendMessage() {
     removeTypingIndicator();
     console.error('[Lumora Dev API]', err);
     showToast('Could not reach the Lumora Dev API — is the backend running?');
-    appendMessage('ai', `\u26a0\ufe0f Failed to get a response from the agent.\n\n${err.message}\n\nMake sure the **Lumora Dev API** workflow is running on port 8000.`);
+    appendMessage('ai', `\u26a0\ufe0f Failed to get a response from the agent.\n\n${err.message}\n\nMake sure the API is reachable at the same origin as this page (Vercel / local server).`);
   }
   isTyping = false;
   sendBtn.disabled = messageInput.value.trim() === '';
