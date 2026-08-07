@@ -14,3 +14,9 @@ Pillow>=10.0.0
 # or Debian/Ubuntu Docker images only). Not installed by default on cloud builders
 # that lack manylinux wheels (Alpine/musl, restricted mirrors, etc.).
 # pytesseract>=0.3.10  # optional for real OCR
+
+# ---------------------------------------------------------------------------
+# VERCEL TEST ONLY notes (nothing removed):
+# - Core deps above are used on Vercel serverless Python.
+# - Playwright remains in requirements-browser.txt for container/local use.
+# ---------------------------------------------------------------------------
