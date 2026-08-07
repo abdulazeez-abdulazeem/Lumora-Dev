@@ -1,4 +1,4 @@
-# Vercel temporary test deployment
+# Vercel temporary test deployment.
 
 **Purpose:** Temporary serverless smoke-test of Lumora Dev on Vercel.
 **Not** a permanent architecture change. Docker / Procfile / server.py remain primary for full deployments.
