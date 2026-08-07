@@ -1802,7 +1802,25 @@ body::after {
 }
 
 /* ─── Terminal Panel ─────────────────────────────────────────────── */
+/*
+ * ROOT CAUSE FIX (mobile black strip):
+ * .terminal-panel is a direct child of .app (flex-direction: row), so as a
+ * static flex item it consumed horizontal space beside .main-wrap (~200–300px
+ * black empty column). Intended layout is a bottom dock under the main column.
+ * Keep element in the DOM; position it as a bottom overlay instead of a
+ * row flex sibling that steals width.
+ */
 .terminal-panel {
+  /* Original in-flow height animation preserved conceptually via height */
+  position: absolute;
+  left: var(--sidebar-w);
+  right: 0;
+  bottom: 0;
+  width: auto;
+  min-width: 0;
+  max-width: none;
+  /* Do not participate in .app row flex sizing */
+  flex: none;
   height: 0;
   overflow: hidden;
   display: flex;
@@ -1810,6 +1828,7 @@ body::after {
   background: #0A0A0E;
   border-top: 1px solid var(--glass-border);
   transition: height 0.25s cubic-bezier(0.22,1,0.36,1);
+  z-index: 25;
 }
 .terminal-panel.open { height: 260px; }
 
@@ -2137,4 +2156,10 @@ body::after {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+
+@media (max-width: 768px) {
+  .terminal-panel { left: 0 !important; right: 0 !important; width: auto !important; }
+  .main-wrap { flex: 1 1 100% !important; width: 100% !important; max-width: none !important; }
 }
