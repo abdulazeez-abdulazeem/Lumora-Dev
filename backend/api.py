@@ -13,13 +13,22 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request, Header
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from langchain_core.messages import HumanMessage
 
 logger = logging.getLogger("lumora.api")
 
-from agent import create_agent
+def _safe_create_agent():
+    try:
+        from agent import create_agent as _ca
+        return _ca()
+    except Exception as e:
+        logger.exception("Agent unavailable at startup: %s", e)
+        return None
+
 from backend.files_router import router as files_router
 from backend.git_router import router as git_router
 from backend.db_router import router as db_router
@@ -57,8 +66,11 @@ async def lifespan(app: FastAPI):
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
     try:
-        _agent = create_agent()
-        logger.info("Lumora Dev agent initialised (v3 Phase 2A).")
+        _agent = _safe_create_agent()
+        if _agent is not None:
+            logger.info("Lumora Dev agent initialised.")
+        else:
+            logger.warning("Agent not initialised — chat returns 503 until OPENROUTER_API_KEY/config fixed")
     except Exception:
         logger.exception("Failed to initialise agent — chat will return 503 until fixed")
         _agent = None
@@ -516,3 +528,45 @@ def edits_get(session_id: str):
         return edit_mod.get_session(session_id)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
+
+
+
+# ── Cloud-native: health alias + optional static UI on same PORT ─────────
+@app.get("/health")
+def health_alias():
+    """Simple health for platforms that probe /health."""
+    return {"status": "ok", "service": "lumora-dev", "version": "4.0.0"}
+
+
+_FRONTEND_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "frontend")
+if os.path.isdir(_FRONTEND_DIR):
+    _index = os.path.join(_FRONTEND_DIR, "index.html")
+
+    @app.get("/")
+    def serve_index():
+        if os.path.isfile(_index):
+            return FileResponse(_index)
+        return {"service": "Lumora Dev API", "docs": "/docs"}
+
+    app.mount("/static-frontend", StaticFiles(directory=_FRONTEND_DIR), name="frontend_static")
+
+    @app.get("/{asset_path:path}")
+    def serve_frontend_asset(asset_path: str):
+        blocked = (
+            "chat", "files", "file", "folder", "terminal", "settings", "git",
+            "github", "activity", "workspaces", "codebase", "db", "auth",
+            "memory", "planner", "edits", "browser", "vision", "knowledge",
+            "multiagent", "system", "deployment", "health", "docs", "openapi.json",
+            "redoc", "static-frontend",
+        )
+        first = asset_path.split("/", 1)[0]
+        if first in blocked:
+            raise HTTPException(status_code=404, detail="Not found")
+        candidate = os.path.normpath(os.path.join(_FRONTEND_DIR, asset_path))
+        if not candidate.startswith(os.path.abspath(_FRONTEND_DIR)):
+            raise HTTPException(status_code=404, detail="Not found")
+        if os.path.isfile(candidate):
+            return FileResponse(candidate)
+        if os.path.isfile(_index):
+            return FileResponse(_index)
+        raise HTTPException(status_code=404, detail="Not found")
