@@ -1,0 +1,743 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lumora Dev</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="icon" href="favicon.ico" type="image/x-icon" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <!-- DarkVeil WebGL background — lowest layer, pointer-events: none -->
+  <canvas id="darkveil-canvas" aria-hidden="true"></canvas>
+  <!-- Dark overlay above the shader, below all glass panels -->
+  <div id="darkveil-overlay" aria-hidden="true"></div>
+
+  <div class="app">
+
+    <!-- Sidebar -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-header">
+        <div class="logo-mark">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+            <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke="#8B5CF6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </div>
+        <span class="logo-text">Lumora Dev</span>
+        <button class="sidebar-close" id="sidebarClose" aria-label="Close sidebar">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
+
+      <div class="sidebar-tabs">
+        <button class="sidebar-tab active" data-tab="chat">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          Chat
+        </button>
+        <button class="sidebar-tab" data-tab="files">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+          Files
+        </button>
+        <button class="sidebar-tab" data-tab="preview">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+          Preview
+        </button>
+        <button class="sidebar-tab" data-tab="scm">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          Git
+        </button>
+        <button class="sidebar-tab" data-tab="activity">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+          Activity
+        </button>
+        <button class="sidebar-tab" data-tab="codebase">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          Codebase
+        </button>
+        <button class="sidebar-tab" data-tab="database">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+          Database
+        </button>
+        <button class="sidebar-tab" data-tab="browser">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15 15 0 0 1 0 20M12 2a15 15 0 0 0 0 20"/></svg>
+          Browser
+        </button>
+        <button class="sidebar-tab" data-tab="vision">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+          Vision
+        </button>
+        <button class="sidebar-tab" data-tab="knowledge">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+          Knowledge
+        </button>
+        <button class="sidebar-tab" data-tab="multiagent">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          Agents
+        </button>
+        <button class="sidebar-tab" data-tab="system">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+          System
+        </button>
+        <button class="sidebar-tab" data-tab="deployment">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+          Deploy
+        </button>
+      </div>
+
+      <div class="tab-panel" id="chatTab">
+
+      <button class="new-chat-btn" id="newChatBtn">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+        </svg>
+        New Chat
+      </button>
+
+      <div class="sidebar-section">
+        <span class="section-label">Recent</span>
+        <ul class="chat-list" id="chatList">
+          <li class="chat-item active">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+            <span>Build landing page</span>
+          </li>
+          <li class="chat-item">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+            <span>Auth with Supabase</span>
+          </li>
+          <li class="chat-item">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+            <span>Dashboard components</span>
+          </li>
+          <li class="chat-item">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+            <span>Fix TypeScript errors</span>
+          </li>
+        </ul>
+      </div>
+
+      <div class="sidebar-section">
+        <span class="section-label">Projects</span>
+        <ul class="project-list">
+          <li class="project-item">
+            <span class="project-dot" style="background:#8B5CF6"></span>
+            <span>Lumora Studio</span>
+          </li>
+          <li class="project-item">
+            <span class="project-dot" style="background:#06B6D4"></span>
+            <span>Dashboard v2</span>
+          </li>
+          <li class="project-item">
+            <span class="project-dot" style="background:#10B981"></span>
+            <span>Mobile App</span>
+          </li>
+        </ul>
+      </div>
+      </div><!-- /chatTab -->
+
+      <div class="tab-panel hidden" id="filesTab">
+        <div class="file-tree" id="fileTree">
+          <div class="ft-loading">
+            <svg class="ft-spinner" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
+            Loading files…
+          </div>
+        </div>
+      </div>
+
+      <div class="tab-panel hidden" id="scmTab">
+        <div class="scm-panel" id="scmPanel">
+          <div class="scm-branch-bar">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>
+            <span id="scmBranch">main</span>
+          </div>
+          <div class="scm-section">
+            <div class="scm-section-header" onclick="toggleScmSection(this)">
+              <span class="scm-chevron">▾</span>
+              <span>Staged Changes</span>
+              <span class="scm-badge" id="scmStagedCount">0</span>
+            </div>
+            <div class="scm-file-list" id="scmStagedList"></div>
+          </div>
+          <div class="scm-section">
+            <div class="scm-section-header" onclick="toggleScmSection(this)">
+              <span class="scm-chevron">▾</span>
+              <span>Changes</span>
+              <span class="scm-badge" id="scmChangesCount">0</span>
+            </div>
+            <div class="scm-file-list" id="scmChangesList"></div>
+          </div>
+          <div class="scm-section">
+            <div class="scm-section-header" onclick="toggleScmSection(this)">
+              <span class="scm-chevron">▾</span>
+              <span>Untracked</span>
+              <span class="scm-badge" id="scmUntrackedCount">0</span>
+            </div>
+            <div class="scm-file-list" id="scmUntrackedList"></div>
+          </div>
+          <div class="scm-commit-area">
+            <input type="text" class="scm-commit-input" id="scmCommitMsg" placeholder="Commit message…" />
+            <button class="scm-commit-btn" id="scmCommitBtn">Commit</button>
+          </div>
+          <div class="scm-actions">
+            <button class="fe-btn" id="scmPull" title="Pull">↓</button>
+            <button class="fe-btn" id="scmPush" title="Push">↑</button>
+            <button class="fe-btn" id="scmFetch" title="Fetch">↻</button>
+            <span class="preview-sep"></span>
+            <button class="fe-btn" id="scmBranches" title="Branches">⎇</button>
+            <button class="fe-btn" id="scmRefresh" title="Refresh">↺</button>
+          </div>
+          <div class="scm-section" style="margin-top:10px;border-top:1px solid var(--glass-border);padding-top:8px">
+            <div class="scm-section-header" onclick="toggleScmSection(this)">
+              <span class="scm-chevron">▾</span>
+              <span>GitHub</span>
+            </div>
+            <div id="scmGitHubContent">
+              <div id="scmGitHubStatus">
+                <button class="pv-btn primary" onclick="connectGitHub()" style="width:100%">Connect GitHub</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="tab-panel hidden" id="activityTab">
+        <div class="activity-panel" id="activityPanel">
+          <div class="activity-task-bar" id="activityTaskBar">
+            <div class="activity-task-title" id="activityTaskTitle">No active task</div>
+            <div class="activity-progress-wrap">
+              <div class="activity-progress-bar"><div class="activity-progress-fill" id="activityProgressFill" style="width:0%"></div></div>
+              <span class="activity-progress-text" id="activityProgressText">0%</span>
+            </div>
+          </div>
+          <div class="activity-log" id="activityLog">
+            <div style="font-size:11px;color:var(--text-4);padding:12px 8px">Send a message to start a task.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="tab-panel hidden" id="codebaseTab">
+        <div class="codebase-panel" id="codebasePanel">
+          <div class="codebase-header">
+            <span>Codebase Index</span>
+            <button class="fe-btn" id="codebaseRefresh" title="Re-index">↺</button>
+          </div>
+          <div class="codebase-stats" id="codebaseStats">
+            <div class="codebase-stat"><span class="codebase-stat-val" id="codebaseFiles">-</span><span>files</span></div>
+            <div class="codebase-stat"><span class="codebase-stat-val" id="codebaseSymbols">-</span><span>symbols</span></div>
+          </div>
+          <div class="codebase-search-wrap">
+            <input type="text" class="codebase-search" id="codebaseSearch" placeholder="Search symbols…" />
+          </div>
+          <div class="codebase-results" id="codebaseResults">
+            <div style="font-size:11px;color:var(--text-4);padding:12px 8px">Click ↺ to index the project.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="tab-panel hidden" id="codebaseTab">
+        <div class="codebase-panel" id="codebasePanel">
+          <div class="codebase-header">
+            <span>Codebase Index</span>
+            <button class="fe-btn" id="codebaseRefresh" title="Re-index">↺</button>
+          </div>
+          <div class="codebase-stats" id="codebaseStats">
+            <div class="codebase-stat"><span class="codebase-stat-val" id="codebaseFiles">-</span><span>files</span></div>
+            <div class="codebase-stat"><span class="codebase-stat-val" id="codebaseSymbols">-</span><span>symbols</span></div>
+          </div>
+          <div class="codebase-search-wrap">
+            <input type="text" class="codebase-search" id="codebaseSearch" placeholder="Search symbols…" />
+          </div>
+          <div class="codebase-results" id="codebaseResults">
+            <div style="font-size:11px;color:var(--text-4);padding:12px 8px">Click ↺ to index the project.</div>
+          </div>
+        </div>
+      </div>
+
+
+      <div class="tab-panel hidden" id="browserTab">
+        <div class="browser-panel" id="browserPanel" style="padding:10px;font-size:12px;color:var(--text-2)">
+          <div style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap">
+            <button class="fe-btn" id="brLaunch">Launch</button>
+            <button class="fe-btn" id="brClose">Close</button>
+            <button class="fe-btn" id="brRefreshStatus">↻ Status</button>
+          </div>
+          <div style="margin-bottom:8px">
+            <span style="color:var(--text-4)">Status:</span>
+            <span id="brStatus">idle</span>
+          </div>
+          <div style="margin-bottom:8px">
+            <span style="color:var(--text-4)">URL:</span>
+            <span id="brUrl" style="word-break:break-all">—</span>
+          </div>
+          <div style="margin-bottom:10px">
+            <span style="color:var(--text-4)">Title:</span>
+            <span id="brTitle">—</span>
+          </div>
+          <div style="display:flex;gap:4px;margin-bottom:8px">
+            <input type="text" id="brUrlInput" placeholder="https://…" style="flex:1;background:var(--bg-2);border:1px solid var(--border);color:var(--text-1);padding:6px 8px;border-radius:6px;font-size:12px" />
+            <button class="fe-btn" id="brGo">Go</button>
+          </div>
+          <div style="font-size:11px;color:var(--text-4);margin-bottom:6px">Tabs</div>
+          <div id="brTabs" style="display:flex;flex-direction:column;gap:4px"></div>
+        </div>
+      </div>
+
+
+      <div class="tab-panel hidden" id="visionTab">
+        <div class="vision-panel" id="visionPanel" style="padding:10px;font-size:12px;color:var(--text-2)">
+          <div style="font-weight:600;margin-bottom:8px;color:var(--text-1)">Vision & UI Intelligence</div>
+          <div style="margin-bottom:6px">
+            <button class="btn-sm" id="visionAnalyzeBtn">Analyze Current</button>
+            <button class="btn-sm" id="visionOcrBtn">OCR</button>
+            <button class="btn-sm" id="visionLayoutBtn">Layout</button>
+          </div>
+          <div id="visionStatus" style="margin:6px 0;opacity:0.8">Ready</div>
+          <div id="visionConfidence" style="margin:4px 0"></div>
+          <pre id="visionIssues" style="max-height:120px;overflow:auto;background:var(--bg-3);padding:6px;border-radius:6px;font-size:11px;white-space:pre-wrap"></pre>
+          <div style="margin-top:8px;font-weight:500">OCR Text</div>
+          <pre id="visionOcr" style="max-height:100px;overflow:auto;background:var(--bg-3);padding:6px;border-radius:6px;font-size:11px;white-space:pre-wrap"></pre>
+          <div style="margin-top:8px;font-weight:500">Recommended Fixes</div>
+          <ul id="visionFixes" style="padding-left:16px;margin:4px 0"></ul>
+          <div id="visionShotWrap" style="margin-top:8px">
+            <img id="visionShot" alt="screenshot" style="max-width:100%;border-radius:6px;display:none" />
+          </div>
+        </div>
+      </div>
+
+      <div class="tab-panel hidden" id="knowledgeTab">
+        <div class="knowledge-panel" id="knowledgePanel" style="padding:10px;font-size:12px;color:var(--text-2)">
+          <div style="font-weight:600;margin-bottom:8px;color:var(--text-1)">Knowledge Engine</div>
+          <div style="display:flex;gap:4px;margin-bottom:8px">
+            <input id="knowledgeQuery" placeholder="Search docs, APIs, decisions…" style="flex:1;padding:4px 8px;border-radius:4px;border:1px solid var(--border);background:var(--bg-3);color:var(--text-1)" />
+            <button class="btn-sm" id="knowledgeSearchBtn">Search</button>
+          </div>
+          <div style="display:flex;gap:4px;margin-bottom:8px">
+            <button class="btn-sm" id="knowledgeReindexBtn">Reindex Project</button>
+            <button class="btn-sm" id="knowledgeListBtn">List Docs</button>
+          </div>
+          <div id="knowledgeStatus" style="margin:4px 0;opacity:0.8">Ready</div>
+          <div id="knowledgeResults" style="max-height:220px;overflow:auto;background:var(--bg-3);padding:6px;border-radius:6px;font-size:11px;white-space:pre-wrap"></div>
+          <div style="margin-top:8px;font-weight:500">Citations</div>
+          <ul id="knowledgeCites" style="padding-left:16px;margin:4px 0;font-size:11px"></ul>
+        </div>
+      </div>
+
+      <div class="tab-panel hidden" id="multiagentTab">
+        <div class="multiagent-panel" id="multiagentPanel" style="padding:10px;font-size:12px;color:var(--text-2)">
+          <div style="font-weight:600;margin-bottom:8px;color:var(--text-1)">Multi-Agent Team</div>
+          <div style="display:flex;gap:4px;margin-bottom:6px">
+            <input id="maGoal" placeholder="Goal for the agent team…" style="flex:1;padding:4px 8px;border-radius:4px;border:1px solid var(--border);background:var(--bg-3);color:var(--text-1)" />
+            <button class="btn-sm" id="maStartBtn">Start</button>
+          </div>
+          <div style="display:flex;gap:4px;margin-bottom:6px">
+            <button class="btn-sm" id="maStatusBtn">Status</button>
+            <button class="btn-sm" id="maTasksBtn">Tasks</button>
+            <button class="btn-sm" id="maMsgsBtn">Messages</button>
+          </div>
+          <div id="maStatus" style="margin:4px 0;opacity:0.8">Ready</div>
+          <div style="font-weight:500;margin-top:6px">Agents</div>
+          <pre id="maAgents" style="max-height:100px;overflow:auto;background:var(--bg-3);padding:6px;border-radius:6px;font-size:11px;white-space:pre-wrap"></pre>
+          <div style="font-weight:500;margin-top:6px">Tasks / Timeline</div>
+          <pre id="maTasks" style="max-height:140px;overflow:auto;background:var(--bg-3);padding:6px;border-radius:6px;font-size:11px;white-space:pre-wrap"></pre>
+          <div style="font-weight:500;margin-top:6px">Messages</div>
+          <pre id="maMsgs" style="max-height:100px;overflow:auto;background:var(--bg-3);padding:6px;border-radius:6px;font-size:11px;white-space:pre-wrap"></pre>
+        </div>
+      </div>
+
+      <div class="tab-panel hidden" id="systemTab">
+        <div class="system-panel" id="systemPanel" style="padding:10px;font-size:12px;color:var(--text-2)">
+          <div style="font-weight:600;margin-bottom:8px;color:var(--text-1)">System Health & Telemetry</div>
+          <div style="display:flex;gap:4px;margin-bottom:6px;flex-wrap:wrap">
+            <button class="btn-sm" id="sysHealthBtn">Health</button>
+            <button class="btn-sm" id="sysMetricsBtn">Metrics</button>
+            <button class="btn-sm" id="sysDiagBtn">Diagnostics</button>
+            <button class="btn-sm" id="sysEventsBtn">Events</button>
+            <button class="btn-sm" id="sysWarmBtn">Warmup</button>
+          </div>
+          <div id="sysStatus" style="margin:4px 0;opacity:0.8">Ready</div>
+          <div style="font-weight:500;margin-top:6px">Health</div>
+          <pre id="sysHealth" style="max-height:140px;overflow:auto;background:var(--bg-3);padding:6px;border-radius:6px;font-size:11px;white-space:pre-wrap"></pre>
+          <div style="font-weight:500;margin-top:6px">Metrics / Diagnostics</div>
+          <pre id="sysMetrics" style="max-height:180px;overflow:auto;background:var(--bg-3);padding:6px;border-radius:6px;font-size:11px;white-space:pre-wrap"></pre>
+        </div>
+      </div>
+
+      <div class="tab-panel hidden" id="deploymentTab">
+        <div class="deployment-panel" id="deploymentPanel" style="padding:10px;font-size:12px;color:var(--text-2)">
+          <div style="font-weight:600;margin-bottom:8px;color:var(--text-1)">Deployment & DevOps</div>
+          <div style="display:flex;gap:4px;margin-bottom:6px;flex-wrap:wrap">
+            <select id="depPlatform" style="padding:4px;border-radius:4px;background:var(--bg-3);color:var(--text-1);border:1px solid var(--border)">
+              <option value="static">static</option>
+              <option value="docker">docker</option>
+              <option value="vercel">vercel</option>
+              <option value="netlify">netlify</option>
+              <option value="railway">railway</option>
+              <option value="render">render</option>
+            </select>
+            <button class="btn-sm" id="depBuildBtn">Build</button>
+            <button class="btn-sm" id="depDeployBtn">Deploy</button>
+            <button class="btn-sm" id="depHistoryBtn">History</button>
+            <button class="btn-sm" id="depPlatformsBtn">Platforms</button>
+          </div>
+          <div id="depStatus" style="margin:4px 0;opacity:0.8">Ready</div>
+          <pre id="depOutput" style="max-height:220px;overflow:auto;background:var(--bg-3);padding:6px;border-radius:6px;font-size:11px;white-space:pre-wrap"></pre>
+        </div>
+      </div>
+      <div class="sidebar-footer">
+        <div class="sidebar-workspace" id="sidebarWorkspace" title="Current project">
+          <span id="sidebarWsIcon">⚡</span>
+          <span id="sidebarWsName">Lumora Dev V2</span>
+        </div>
+        <button class="footer-btn" id="settingsBtn">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/>
+          </svg>
+          Settings
+        </button>
+        <div class="user-chip">
+          <div class="user-avatar">L</div>
+          <span>Lumora</span>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Overlay -->
+    <div class="sidebar-overlay" id="sidebarOverlay"></div>
+
+    <!-- Main wrapper -->
+    <div class="main-wrap">
+    <!-- Main -->
+    <main class="main" id="main">
+
+      <!-- Top Nav -->
+      <nav class="topnav">
+        <button class="menu-btn" id="menuBtn" aria-label="Open sidebar">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
+          </svg>
+        </button>
+
+        <div class="nav-brand">
+          <div class="nav-logo-mark">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+              <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke="#8B5CF6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </div>
+          <span class="nav-title">Lumora Dev</span>
+          <span class="nav-badge">Stage 1</span>
+        </div>
+
+        <button class="icon-btn" id="navSettingsBtn" aria-label="Settings">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <circle cx="12" cy="12" r="3"/>
+            <path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/>
+          </svg>
+        </button>
+      </nav>
+
+      <!-- Chat Area -->
+      <div class="chat-area" id="chatArea">
+
+        <!-- Workspace Dashboard (replaces welcome when active) -->
+        <div class="dashboard" id="dashboard">
+          <div class="dashboard-header">
+            <div>
+              <h1 class="dashboard-title">Lumora Dev</h1>
+              <p class="dashboard-sub">Workspace &amp; Project Manager</p>
+            </div>
+            <div class="dashboard-search-wrap">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+              <input type="text" class="dashboard-search" id="dashboardSearch" placeholder="Search projects…" />
+            </div>
+          </div>
+          <div class="dashboard-sort">
+            <button class="dashboard-sort-btn active" data-sort="date">Recent</button>
+            <button class="dashboard-sort-btn" data-sort="name">Name</button>
+            <button class="dashboard-sort-btn" data-sort="favorite">Favorites</button>
+          </div>
+          <div class="dashboard-section">
+            <div class="dashboard-section-title">Projects</div>
+            <div class="dashboard-grid" id="dashboardGrid">
+              <!-- project cards rendered by JS -->
+            </div>
+          </div>
+          <div class="dashboard-section">
+            <div class="dashboard-section-title">Templates</div>
+            <div class="template-grid" id="templateGrid">
+              <button class="template-card" data-template="react"><span class="template-icon">⚛️</span><span>React</span></button>
+              <button class="template-card" data-template="nextjs"><span class="template-icon">▲</span><span>Next.js</span></button>
+              <button class="template-card" data-template="python"><span class="template-icon">🐍</span><span>Python</span></button>
+              <button class="template-card" data-template="fastapi"><span class="template-icon">🚀</span><span>FastAPI</span></button>
+              <button class="template-card" data-template="nodejs"><span class="template-icon">💚</span><span>Node.js</span></button>
+              <button class="template-card" data-template="html"><span class="template-icon">🌐</span><span>HTML/CSS/JS</span></button>
+              <button class="template-card" data-template="empty"><span class="template-icon">📁</span><span>Empty</span></button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Welcome Screen -->
+        <div class="welcome" id="welcome">
+          <div class="welcome-glow"></div>
+          <div class="welcome-icon">
+            <svg width="40" height="40" viewBox="0 0 24 24" fill="none">
+              <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke="#8B5CF6" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </div>
+          <h1 class="welcome-title">Lumora Dev</h1>
+          <p class="welcome-sub">Your AI coding partner for Lumora Studio.<br/>Generate • Debug • Explain • Build.</p>
+          <div class="suggestion-grid">
+            <button class="suggestion-chip" data-prompt="Create a modern hero section for Lumora Studio using Next.js and Tailwind">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
+              Build a hero section
+            </button>
+            <button class="suggestion-chip" data-prompt="Set up Supabase auth with email and Google OAuth in Next.js App Router">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+              Add Supabase auth
+            </button>
+            <button class="suggestion-chip" data-prompt="Explain the Next.js App Router folder structure and how layouts work">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+              Explain App Router
+            </button>
+            <button class="suggestion-chip" data-prompt="Create a reusable Button component in TypeScript with variants: primary, secondary, ghost">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+              Generate a component
+            </button>
+          </div>
+        </div>
+
+        <!-- Messages -->
+        <div class="messages" id="messages"></div>
+
+      </div>
+
+      <!-- Input Area -->
+      <div class="input-area">
+        <div class="input-wrapper">
+          <div class="input-container glass">
+            <button class="attach-btn icon-btn" id="attachBtn" aria-label="Attach file">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
+              </svg>
+            </button>
+            <textarea
+              id="messageInput"
+              class="message-input"
+              placeholder="Ask Lumora Dev anything…"
+              rows="1"
+              autocomplete="off"
+              spellcheck="false"
+            ></textarea>
+            <button class="send-btn" id="sendBtn" aria-label="Send message" disabled>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/>
+              </svg>
+            </button>
+          </div>
+          <p class="input-hint">Enter to send · Shift+Enter for new line</p>
+        </div>
+      </div>
+
+      <!-- Code Editor panel -->
+      <div class="code-viewer" id="codeViewer">
+        <div class="editor-tab-bar" id="editorTabBar">
+          <!-- tabs injected here -->
+        </div>
+        <div class="editor-body">
+          <div class="editor-gutter" id="editorGutter"></div>
+          <textarea
+            class="editor-textarea"
+            id="editorTextarea"
+            spellcheck="false"
+            autocomplete="off"
+            autocorrect="off"
+            autocapitalize="off"
+          ></textarea>
+          <div class="editor-find" id="editorFind" style="display:none">
+            <input class="editor-find-input" id="editorFindInput" placeholder="Find…" />
+            <span class="editor-find-count" id="editorFindCount"></span>
+            <button class="editor-find-btn" id="editorFindPrev" title="Previous">▲</button>
+            <button class="editor-find-btn" id="editorFindNext" title="Next">▼</button>
+            <button class="editor-find-btn" id="editorFindClose" title="Close">✕</button>
+          </div>
+        </div>
+        <div class="editor-statusbar" id="editorStatusbar">
+          <span id="editorStatusLang"></span>
+          <span class="editor-status-sep"></span>
+          <span id="editorStatusLines"></span>
+          <span class="editor-status-sep"></span>
+          <span id="editorStatusSave"></span>
+        </div>
+      </div>
+
+      <!-- Preview panel -->
+      <div class="preview-panel" id="previewPanel">
+        <div class="preview-toolbar">
+          <div class="preview-toolbar-left">
+            <button class="preview-btn" id="pvReload" title="Reload">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+            </button>
+            <button class="preview-btn" id="pvAutoReload" title="Auto Refresh" data-state="on">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 2v6h-6M3 12a9 9 0 0 1 15.36-6.36L21 8M3 22v-6h6M21 12a9 9 0 0 1-15.36 6.36L3 16"/></svg>
+            </button>
+            <span class="preview-sep"></span>
+            <button class="preview-btn" id="pvZoomOut" title="Zoom Out">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
+            </button>
+            <span class="preview-zoom-label" id="pvZoomLabel">100%</span>
+            <button class="preview-btn" id="pvZoomIn" title="Zoom In">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
+            </button>
+          </div>
+          <div class="preview-toolbar-right">
+            <button class="preview-device-btn" data-device="desktop" id="pvDesktop" title="Desktop">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+            </button>
+            <button class="preview-device-btn" data-device="tablet" id="pvTablet" title="Tablet">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="2" width="16" height="20" rx="2"/><line x1="12" y1="18" x2="12" y2="18.01"/></svg>
+            </button>
+            <button class="preview-device-btn" data-device="mobile" id="pvMobile" title="Mobile">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12" y2="18.01"/></svg>
+            </button>
+            <span class="preview-sep"></span>
+            <button class="preview-btn" id="pvExternal" title="Open in new tab">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+            </button>
+            <button class="preview-btn" id="pvClose" title="Close preview">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+          </div>
+        </div>
+        <div class="preview-frame-wrap" id="previewFrameWrap">
+          <iframe class="preview-iframe" id="previewIframe" sandbox="allow-scripts allow-same-origin" title="Live Preview"></iframe>
+          <div class="preview-error" id="previewError" style="display:none">
+            <div class="preview-error-icon">
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#F87171" stroke-width="1.5" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+            </div>
+            <div class="preview-error-title" id="previewErrorTitle">Preview unavailable</div>
+            <div class="preview-error-msg" id="previewErrorMsg">Open an HTML file to preview it.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Database Studio View -->
+      <div class="database-view hidden" id="databaseView">
+        <div class="db-layout">
+          <div class="db-sidebar">
+            <div class="db-connections" id="dbConnections">
+              <div class="db-section-title">Connections</div>
+              <div class="db-conn-item active" data-conn="default"><span>🗄</span><span>Local SQLite</span></div>
+            </div>
+            <div class="db-explorer" id="dbExplorer">
+              <div class="db-section-title">Tables</div>
+              <div id="dbTableList" style="font-size:11px;color:var(--text-4);padding:8px">Loading…</div>
+            </div>
+          </div>
+          <div class="db-main">
+            <div class="db-toolbar">
+              <span class="db-toolbar-title" id="dbTableTitle">Query Editor</span>
+              <button class="pv-btn primary" id="dbRunBtn" onclick="runDbQuery()">▶ Run</button>
+            </div>
+            <textarea class="db-editor" id="dbEditor" placeholder="Write SQL here…&#10;&#10;SELECT * FROM sqlite_master WHERE type='table';" spellcheck="false"></textarea>
+            <div class="db-results" id="dbResults">
+              <div class="db-results-placeholder">Run a query to see results here</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </main>
+    </div><!-- /main-wrap -->
+
+    <!-- Terminal Panel -->
+    <div class="terminal-panel" id="terminalPanel">
+      <div class="terminal-toolbar">
+        <div class="terminal-tabs" id="terminalTabs">
+          <div class="term-tab active" data-idx="0">
+            <span>Terminal 1</span>
+            <button class="term-tab-close" data-close="0">&times;</button>
+          </div>
+        </div>
+        <div class="terminal-toolbar-actions">
+          <button class="term-tb-btn" id="termNew" title="New Terminal">+</button>
+          <button class="term-tb-btn" id="termClear" title="Clear">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>
+          </button>
+          <button class="term-tb-btn" id="termKill" title="Kill">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+          </button>
+          <span class="terminal-sep"></span>
+          <button class="term-tb-btn" id="termToggle" title="Toggle Terminal">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg>
+          </button>
+        </div>
+      </div>
+      <div class="terminal-body" id="terminalBody">
+        <div class="terminal-output" id="terminalOutput"></div>
+        <div class="terminal-input-line">
+          <span class="terminal-prompt" id="terminalPrompt">$</span>
+          <input
+            type="text"
+            class="terminal-input"
+            id="terminalInput"
+            autocomplete="off"
+            spellcheck="false"
+            autocapitalize="off"
+          />
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Settings Modal -->
+  <div class="modal-overlay" id="settingsModal">
+    <div class="modal glass modal-wide">
+      <div class="modal-header">
+        <div class="settings-nav">
+          <button class="settings-nav-btn active" data-panel="general">General</button>
+          <button class="settings-nav-btn" data-panel="providers">AI Providers</button>
+        </div>
+        <button class="modal-close" id="modalClose">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <!-- General Panel -->
+        <div class="settings-panel active" id="panelGeneral">
+          <div class="setting-row">
+            <label>Model</label>
+            <div class="setting-value" id="genModel">cohere/north-mini-code:free</div>
+          </div>
+          <div class="setting-row">
+            <label>Provider</label>
+            <div class="setting-value" id="genProvider">OpenRouter</div>
+          </div>
+          <div class="setting-row">
+            <label>Stage</label>
+            <div class="setting-value">Stage 5 + All Features</div>
+          </div>
+          <div class="setting-row">
+            <label>Theme</label>
+            <div class="setting-value">Matte Dark</div>
+          </div>
+        </div>
+        <!-- Providers Panel -->
+        <div class="settings-panel" id="panelProviders">
+          <div class="providers-grid" id="providersGrid">
+            <!-- injected by JS -->
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="darkveil.js"></script>
+  <script src="script.js"></script>
+</body>
+</html>

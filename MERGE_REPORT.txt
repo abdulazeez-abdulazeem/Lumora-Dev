@@ -1,0 +1,180 @@
+================================================================================
+LUMORA DEV – TRUE IN-PLACE FEATURE MERGE REPORT
+================================================================================
+Date: 2026-08-06
+Base (source of truth, fully preserved): Project B – Lumora-Dev V2, backup.zip
+Source of improvements: Project A – Lumora-Dev-V2-Complete.zip
+
+This merge was performed IN PLACE on the complete Project B tree.
+Nothing was rebuilt from scratch. .git, .local, .agents, src, and all
+existing files/folders were retained.
+
+================================================================================
+SIZE / COUNT COMPARISON
+================================================================================
+Project B original ZIP:     ~3.4 MB (3510589 bytes)
+Project B extracted:        793 files, 324 directories
+Final merged tree:          805 files, 325 directories
+  (net +12 files: 5 new backend modules, __init__.py, MERGE_REPORT.txt,
+   and minor runtime artifacts)
+
+Final ZIP size will be similar to original (~3 MB range) because the
+bulk of the archive is .local skills + .git objects, which were preserved.
+
+================================================================================
+1. FILES COPIED (new modules from Project A, did not exist in B)
+================================================================================
+  backend/orchestrator.py
+  backend/providers.py
+  backend/codebase_indexer.py
+  backend/db_router.py
+  backend/git_router.py
+  backend/__init__.py          (package marker)
+
+================================================================================
+2. FILES MODIFIED (merged / enhanced in place)
+================================================================================
+  agent.py
+    - Replaced with Project A version (superset).
+    - Adds: multi-provider LLM factory, search_codebase, get_project_map,
+      extra HTTP-backed tools. B’s original file tools remain available.
+
+  backend/api.py
+    - Replaced with Project A version (superset).
+    - Adds: include of git_router, db_router; task orchestration on /chat;
+      /activity; /codebase/index|stats|search.
+
+  backend/files_router.py
+    - Started from Project A full router (CRUD, terminal, settings, workspaces).
+    - Merged Project B security into _safe_path:
+        Path.relative_to + IGNORE_DIRS / IGNORE_FILES segment checks.
+    - Added Project B DELETE /folder compatibility endpoint.
+    - Added missing import: from backend.providers import list_providers, get_provider
+
+  server.py
+    - Kept Project B structure and /folder proxy path.
+    - Expanded PROXY_PATHS to union of A + B:
+        /chat /files /file /folder /terminal /settings /git /github
+        /activity /workspaces /codebase /db
+    - Added do_PUT method (from A).
+    - DELETE now forwards request body (needed by A frontend JSON deletes).
+    - CORS Allow-Methods includes PUT.
+
+  frontend/index.html
+  frontend/script.js
+  frontend/styles.css
+    - Replaced with Project A versions (full feature UI: settings, git, db,
+      terminal, activity, workspaces). Chat + file explorer flows from B
+      are still present and expanded.
+
+  requirements.txt
+    - Appended: httpx>=0.28.0
+
+  .gitignore
+    - Appended runtime state ignores:
+        .tasks.table, .lumora-settings.json, .codebase_index.json, *.table
+
+================================================================================
+3. FILES LEFT UNTOUCHED (preserved from Project B)
+================================================================================
+  .git/                        (full history, objects, refs)
+  .local/                      (all skills, secondary_skills, artifacts)
+  .agents/
+  src/
+  .env.example
+  .replit                      (workflows unchanged)
+  README.md
+  replit.md
+  test_openrouter.py
+  frontend/darkveil.js         (identical to A)
+  frontend/favicon.ico         (identical to A)
+  __pycache__/                 (existing bytecode left as-is)
+  All other .local / .git content
+
+================================================================================
+4. FEATURES IMPORTED FROM PROJECT A
+================================================================================
+  • Multi-provider AI (OpenRouter, OpenAI, Anthropic, Google, Groq, etc.)
+  • Codebase indexer + search (agent tools + HTTP API)
+  • Task orchestrator + activity feed
+  • Git router (status, stage, commit, branches, init, clone)
+  • GitHub integration (connect, repos, create, remote)
+  • Database query console
+  • Terminal execution (/terminal/exec)
+  • Settings UI endpoints (providers, models, defaults)
+  • Workspaces CRUD
+  • Enhanced file CRUD + unified delete
+  • Expanded web UI panels
+
+================================================================================
+5. CONFLICTS AND RESOLUTIONS
+================================================================================
+  CONFLICT 1 – PROXY_PATHS
+    B: /chat /files /file /folder
+    A: /chat /files /file /terminal /settings /git /github /activity
+       /workspaces /codebase /db
+    RESOLUTION: Union of both; /folder retained.
+
+  CONFLICT 2 – Path safety helper
+    B: relative_to + IGNORE segment checks
+    A: startswith only
+    RESOLUTION: B’s stronger checks applied inside A’s router.
+
+  CONFLICT 3 – Folder delete API
+    B: DELETE /folder (query param, empty only)
+    A: DELETE /file (JSON body, file or empty folder)
+    RESOLUTION: Both kept. A endpoint is primary; B endpoint as compatibility.
+
+  CONFLICT 4 – Frontend
+    B: smaller chat + file tree UI
+    A: full IDE shell
+    RESOLUTION: A frontend installed (superset of B features).
+
+  CONFLICT 5 – agent / api
+    A is strict superset of B functionality.
+    RESOLUTION: A versions installed; no B-only logic was discarded.
+
+================================================================================
+6. CONSISTENCY CHECKS
+================================================================================
+  ✓ All merged Python modules compile (py_compile)
+  ✓ .git present
+  ✓ .local present
+  ✓ .agents present
+  ✓ src present
+  ✓ .replit present
+  ✓ Original core source files present
+  ✓ All new A modules present under backend/
+  ✓ File count increased only by added modules (793 → 805)
+  ✓ No original Project B directories removed
+
+================================================================================
+7. FINAL ARCHITECTURE (superset of Project B)
+================================================================================
+  Lumora-Dev/
+  ├── .git/                    (preserved)
+  ├── .local/                  (preserved – skills, artifacts)
+  ├── .agents/                 (preserved)
+  ├── src/                     (preserved)
+  ├── .env.example, .gitignore, .replit
+  ├── agent.py                 (enhanced)
+  ├── server.py                (enhanced proxy)
+  ├── requirements.txt         (+ httpx)
+  ├── README.md, replit.md, test_openrouter.py
+  ├── MERGE_REPORT.txt         (this file)
+  ├── backend/
+  │   ├── api.py               (enhanced)
+  │   ├── files_router.py      (enhanced + B security)
+  │   ├── git_router.py        (NEW)
+  │   ├── db_router.py         (NEW)
+  │   ├── orchestrator.py      (NEW)
+  │   ├── providers.py         (NEW)
+  │   ├── codebase_indexer.py  (NEW)
+  │   └── __init__.py
+  └── frontend/                (enhanced UI)
+
+  Ports: 5000 frontend+proxy, 8000 FastAPI
+
+================================================================================
+END OF MERGE REPORT
+================================================================================

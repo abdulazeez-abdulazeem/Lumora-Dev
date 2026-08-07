@@ -1,135 +1,79 @@
-# Lumora Development Agent
+# Lumora Dev v4.0
 
-**Your personal AI coding partner for building Lumora Studio**
+**Autonomous software engineering agent — local-first, safety-aware**
 
-Stage 1 (with Stage 2 file tools already prepared)
-
----
-
-### What it can do right now
-
-- Generate clean Next.js + TypeScript + Tailwind code
-- Explain any code clearly
-- Help debug and fix errors
-- **Read, write, list, and create real project files**
-- Remember the full conversation in the current session
-- Stay strictly focused on the Lumora Studio tech stack and vision
+Evolution of v2.5. Same architecture. New: local security, persistent memory, task planner, edit rollback, richer codebase intelligence.
 
 ---
 
-### Official Lumora Stack (the agent knows this deeply)
-
-| Layer            | Technology                  |
-|------------------|-----------------------------|
-| Frontend         | Next.js (App Router)        |
-| Language         | TypeScript                  |
-| Styling          | Tailwind CSS                |
-| UI               | React                       |
-| Backend / Auth   | Supabase                    |
-| Version Control  | GitHub                      |
-| Deployment       | Vercel                      |
-| AI               | Google Gemini API           |
-| Future Agent     | LangGraph + Gemini          |
-
----
-
-## Quick Start (Termux / Android or any computer)
+### Quick Start
 
 ```bash
-# 1. Clone or copy this folder
-cd lumora-agent
-
-# 2. Create virtual environment
-python -m venv venv
-source venv/bin/activate          # Termux / Linux / macOS
-# venv\Scripts\activate           # Windows
-
-# 3. Install dependencies
+cp .env.example .env   # add OPENROUTER_API_KEY
 pip install -r requirements.txt
-
-# 4. Add your free Gemini API key
-cp .env.example .env
-# Edit .env and paste your key from → https://aistudio.google.com/app/apikey
-
-# 5. Run the agent
-python agent.py
+# API (prefer localhost)
+uvicorn backend.api:app --host 127.0.0.1 --port 8000
+# UI proxy (localhost by default; LUMORA_BIND=0.0.0.0 to expose)
+python server.py
 ```
 
----
+Open http://127.0.0.1:5000
 
-## Example conversations
-
-```
-You: Create a modern landing page for Lumora Studio using Next.js App Router, TypeScript and Tailwind
-
-You: List all files in the current directory
-
-You: Read the file src/app/page.tsx and improve the hero section
-
-You: I'm getting this error: [paste error]. Fix it.
-
-You: Create a new component at src/components/ui/Button.tsx
-```
-
-The agent will use the file tools automatically when needed.
-
-Type `exit` or `quit` to stop.
-
----
-
-## Project Structure
-
-```
-lumora-agent/
-├── agent.py              ← Main agent (Stage 1 + file tools)
-├── requirements.txt
-├── .env.example
-├── .gitignore
-├── README.md
-└── LICENSE (optional)
-```
-
----
-
-## Push this agent to GitHub (recommended)
-
-1. Create a new repository on GitHub (e.g. `lumora-agent`)
-2. In this folder run:
+Optional local password:
 
 ```bash
-git init
-git add .
-git commit -m "Initial commit: Lumora Development Agent Stage 1"
-git branch -M main
-git remote add origin https://github.com/YOUR_USERNAME/lumora-agent.git
-git push -u origin main
+curl -X POST http://127.0.0.1:8000/auth/set-password -H 'Content-Type: application/json' -d '{"password":"yourpass"}'
+# send header X-Lumora-Token: <token> on subsequent requests
 ```
 
-Replace `YOUR_USERNAME` with your real GitHub username.
+CLI: `python agent.py`
 
-**Important**: Never commit your real `.env` file. The `.gitignore` already protects it.
-
----
-
-## Roadmap
-
-| Stage | Focus                                      | Status          |
-|-------|--------------------------------------------|-----------------|
-| 1     | Basic coding + memory + file tools         | ✅ You are here |
-| 2     | Deep project awareness + multi-file edits  | Next            |
-| 3     | Planning, refactoring, tests, documentation| Later           |
-| 4     | Autonomous (PRs, deploy, monitor)          | Long-term       |
+Tests: `pytest tests/ -q`
 
 ---
 
-## Tips for Android / Termux
+### Phase 2A — Browser Automation
 
-- Keep the same terminal session open so conversation memory stays alive
-- Run the agent **inside** your Lumora Studio project folder if you want it to edit real files
-- Use `gemini-2.0-flash` (already set) to stay within free limits
-- Later you can add GitHub / Vercel / Supabase tools
+Playwright-based browsing for the agent and UI. See `BROWSER_AUTOMATION.md`.
+
+```bash
+pip install playwright && playwright install chromium
+```
+
+### Phase 1 capabilities
+
+| Area | What you get |
+|------|----------------|
+| **Local security** | Bind 127.0.0.1 by default; optional password; encrypted API keys; terminal allowlist + destructive confirm |
+| **Memory** | Architecture, preferences, decisions, completed/pending work — persists in `.lumora-memory.json` |
+| **Planner** | Auto-decompose chat into steps; pause / resume / retry |
+| **Codebase intelligence** | Symbol search, semantic token search, architecture overview, dependency hubs |
+| **Edit sessions** | Multi-file writes with rollback |
+| **Observability** | `/activity/timeline` — tasks, plans, tool activity |
 
 ---
 
-Built free-first • Android-first • Memory-first  
-Part of the Lumora journey.
+### Architecture (unchanged shape)
+
+```
+Browser → server.py (:5000, localhost default)
+            → FastAPI backend.api (:8000)
+                 files | git | db | chat | memory | planner | edits | auth
+            agent.py (LangGraph + tools)
+```
+
+---
+
+### Security notes (local single-user)
+
+- Do **not** set `LUMORA_BIND=0.0.0.0` on untrusted networks without enabling password auth.
+- Terminal defaults to **safe** mode (allowlist). Destructive commands need `confirm=true`.
+- API keys in settings are encrypted with a local Fernet key (`.lumora-secret.key`).
+
+---
+
+### Version
+
+**Lumora Dev v3.0.0-phase2a**
+
+See `CHANGELOG_v3.md` and `V3_PHASE1_REPORT.md`.
