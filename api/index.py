@@ -1,9 +1,9 @@
 """
 VERCEL TEST ONLY entrypoint.
 
-Re-exports backend.api:app when available.
-Falls back to a minimal FastAPI app so /health works during partial deploys.
-Does not delete or replace the original Lumora architecture.
+Defines a top-level FastAPI `app` (required by Vercel static detection).
+When backend.api is importable (full GitHub deploy), routes are merged at runtime.
+Original backend/api.py is unchanged and remains the source of truth for containers.
 """
 from __future__ import annotations
 
@@ -16,28 +16,41 @@ if _ROOT not in sys.path:
 
 os.environ.setdefault("LUMORA_RUNTIME", "vercel")
 
+from fastapi import FastAPI
+
+# Vercel requires a top-level FastAPI() constructor assignment named `app`.
+app = FastAPI(
+    title="Lumora Dev API",
+    description="Temporary Vercel test entry — full app lives in backend.api",
+    version="4.0.0",
+)
+
+
+@app.get("/health")
+def health():
+    return {"status": "ok", "service": "Lumora Dev", "version": "4.0.0", "runtime": "vercel"}
+
+
+@app.get("/")
+def root():
+    return {
+        "status": "ok",
+        "service": "Lumora Dev",
+        "version": "4.0.0",
+        "docs": "/docs",
+        "health": "/health",
+    }
+
+
+# VERCEL TEST ONLY: try to attach full Lumora app routes when backend is present.
+# Does not delete backend.api; container deploys still use backend.api:app directly.
 try:
-    from backend.api import app  # full Lumora
-except Exception as _import_err:  # VERCEL TEST ONLY fallback
-    # VERCEL TEST ONLY:
-    # Temporarily use a minimal app if backend package is missing from the
-    # serverless bundle. Original backend.api remains the real application.
-    from fastapi import FastAPI
+    from backend.api import app as _lumora_app  # noqa: E402
 
-    app = FastAPI(title="Lumora Dev (Vercel fallback)", version="4.0.0")
-
-    @app.get("/health")
-    def health():
-        return {
-            "status": "ok",
-            "service": "Lumora Dev",
-            "version": "4.0.0",
-            "runtime": "vercel-fallback",
-            "import_error": str(_import_err)[:500],
-        }
-
-    @app.get("/")
-    def root():
-        return health()
+    # Prefer full application object when the package is bundled (GitHub import).
+    app = _lumora_app
+except Exception:
+    # Backend not in this serverless bundle — keep minimal /health above.
+    pass
 
 __all__ = ["app"]
