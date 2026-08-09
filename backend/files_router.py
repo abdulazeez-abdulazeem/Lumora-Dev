@@ -19,14 +19,75 @@ from backend.security import encrypt_secret, decrypt_secret
 router = APIRouter()
 logger = logging.getLogger("lumora.files")
 
-# Project root = two levels up from this file (backend/files_router.py → root)
-ROOT = Path(__file__).resolve().parent.parent
+# Lumora Dev application root (source/runtime — NOT the user project tree)
+APP_ROOT = Path(__file__).resolve().parent.parent
 
-# Directories to skip entirely
+# Legacy alias — many helpers still reference ROOT; effective file root is dynamic.
+ROOT = APP_ROOT
+
+# Directories to skip entirely (never show in user workspace tree either)
 IGNORE_DIRS: set[str] = {
     ".git", "venv", "__pycache__", "node_modules",
     ".cache", ".local", ".agents", ".pythonlibs",
+    "_vendor", ".vercel",
 }
+
+# Filenames that belong to Lumora runtime — never treat as "user project" at app root
+_LUMORA_RUNTIME_NAMES = {
+    "Dockerfile", "Procfile", "railway.toml", "render.yaml", "vercel.json",
+    "requirements.txt", "requirements-browser.txt", "server.py", "agent.py",
+    "app.py", "ROADMAP.md", "SYSTEM.md", "CHANGELOG.md", "CHANGELOG_v3.md",
+}
+
+
+def _user_workspaces_root() -> Path:
+    """Writable isolated area for user projects (separate from Lumora source)."""
+    import os
+    override = os.environ.get("LUMORA_USER_WORKSPACES")
+    if override:
+        p = Path(override)
+        p.mkdir(parents=True, exist_ok=True)
+        return p
+    # Prefer project-local dir when writable (Docker/local); else /tmp on Vercel
+    preferred = APP_ROOT / "user-workspaces"
+    try:
+        preferred.mkdir(parents=True, exist_ok=True)
+        probe = preferred / ".write-probe"
+        probe.write_text("ok", encoding="utf-8")
+        probe.unlink(missing_ok=True)
+        return preferred
+    except OSError:
+        p = Path("/tmp/lumora-user-workspaces")
+        p.mkdir(parents=True, exist_ok=True)
+        return p
+
+
+USER_WORKSPACES_ROOT = _user_workspaces_root()
+
+# Request-scoped active workspace id (set by middleware / dependency)
+_active_workspace_id: str | None = None
+
+
+def set_active_workspace(ws_id: str | None) -> None:
+    global _active_workspace_id
+    _active_workspace_id = (ws_id or "").strip() or None
+
+
+def get_active_workspace_id() -> str | None:
+    return _active_workspace_id
+
+
+def effective_root() -> Path:
+    """Root for file CRUD: active user workspace, never the full Lumora source tree."""
+    ws_id = _active_workspace_id
+    if not ws_id:
+        # No project selected — empty isolated sandbox (not APP_ROOT)
+        empty = USER_WORKSPACES_ROOT / "_empty"
+        empty.mkdir(parents=True, exist_ok=True)
+        return empty
+    root = USER_WORKSPACES_ROOT / ws_id
+    root.mkdir(parents=True, exist_ok=True)
+    return root
 
 # Specific filenames to hide (e.g. secrets)
 IGNORE_FILES: set[str] = {".env"}
@@ -66,19 +127,19 @@ class TerminalExecRequest(BaseModel):
 # ── Helpers ─────────────────────────────────────────────────────────────────
 def _safe_path(rel: str) -> Path:
     """
-    Resolve a relative path within the project root.
-    Blocks path traversal and access to protected dirs/files (Project B security preserved).
+    Resolve a relative path within the *active user workspace* root.
+    Never allows access outside that workspace (source repo is isolated).
     """
+    safe_root = effective_root().resolve()
     if not rel or rel.strip() in ("", "."):
-        return ROOT.resolve()
+        return safe_root
 
-    safe_root = ROOT.resolve()
     target = (safe_root / rel).resolve()
 
     try:
         target.relative_to(safe_root)
     except ValueError:
-        raise HTTPException(status_code=403, detail="Access denied: path is outside project root")
+        raise HTTPException(status_code=403, detail="Access denied: path is outside project workspace")
 
     for part in target.relative_to(safe_root).parts:
         if part in IGNORE_DIRS or part in IGNORE_FILES:
@@ -123,8 +184,17 @@ def build_tree(path: Path, rel: str = "") -> list:
 # ── Read routes ─────────────────────────────────────────────────────────────
 @router.get("/files")
 def list_files():
-    """Return the full project directory tree as JSON."""
-    return {"files": build_tree(ROOT)}
+    """Return the active *user project* directory tree (not Lumora source)."""
+    root = effective_root()
+    ws = get_active_workspace_id()
+    files = build_tree(root)
+    return {
+        "files": files,
+        "workspace_id": ws or "",
+        "workspace_root": str(root),
+        "is_user_workspace": bool(ws),
+        "hint": None if ws else "No project selected. Create or open a project to see its files.",
+    }
 
 
 @router.get("/file")
@@ -488,7 +558,21 @@ def set_default(req: SetDefaultRequest):
 
 
 # ── Workspace routes ───────────────────────────────────────────────────
-WORKSPACES_FILE = ROOT / ".workspaces.table"
+def _workspaces_file() -> Path:
+    preferred = APP_ROOT / ".workspaces.table"
+    try:
+        preferred.parent.mkdir(parents=True, exist_ok=True)
+        if not preferred.exists():
+            preferred.write_text('{"fields":[],"data":[]}', encoding="utf-8")
+        return preferred
+    except OSError:
+        p = Path("/tmp/lumora-workspaces.table")
+        if not p.exists():
+            p.write_text('{"fields":[],"data":[]}', encoding="utf-8")
+        return p
+
+WORKSPACES_FILE = _workspaces_file()
+
 
 def _read_workspaces() -> dict:
     if not WORKSPACES_FILE.exists():
@@ -499,7 +583,12 @@ def _read_workspaces() -> dict:
         return {"fields": [], "data": []}
 
 def _write_workspaces(data: dict):
-    WORKSPACES_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    try:
+        WORKSPACES_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    except OSError:
+        alt = Path("/tmp/lumora-workspaces.table")
+        alt.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
 
 
 @router.get("/workspaces")
@@ -528,11 +617,40 @@ def create_workspace(req: WorkspaceCreateRequest):
         ws_id = ws_id + "-" + str(len(ws["data"]))
     now = time.strftime("%Y-%m-%dT%H:%M:%SZ")
     icon_map = {"react": "⚛️", "next.js": "▲", "python": "🐍", "fastapi": "🚀", "node.js": "💚", "html": "🌐", "": "📁"}
+    # Physical isolated directory for this user project
+    ws_dir = USER_WORKSPACES_ROOT / ws_id
+    ws_dir.mkdir(parents=True, exist_ok=True)
+    # Seed README so the tree is never empty
+    readme = ws_dir / "README.md"
+    if not readme.exists():
+        readme.write_text(
+            f"# {req.name}\n\n{req.description or 'User project workspace for Lumora Dev.'}\n",
+            encoding="utf-8",
+        )
+    # HTML template seed
+    tpl = (req.template or req.framework or "").lower()
+    if tpl in ("html", "html/css/js", "static") and not (ws_dir / "index.html").exists():
+        (ws_dir / "index.html").write_text(
+            f"<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n<meta charset=\"UTF-8\"/>\n"
+            f"<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/>\n"
+            f"<title>{req.name}</title>\n<link rel=\"stylesheet\" href=\"styles.css\"/>\n</head>\n"
+            f"<body>\n  <main>\n    <h1>{req.name}</h1>\n    <p>Start building with Lumora Dev.</p>\n  </main>\n"
+            f"  <script src=\"script.js\"></script>\n</body>\n</html>\n",
+            encoding="utf-8",
+        )
+        (ws_dir / "styles.css").write_text(
+            "*,*::before,*::after{box-sizing:border-box}body{margin:0;font-family:system-ui,sans-serif;"
+            "background:#0a0a0c;color:#f4f4f5;min-height:100vh;display:grid;place-items:center}"
+            "main{text-align:center;padding:2rem}h1{font-size:2rem;margin-bottom:.5rem}\n",
+            encoding="utf-8",
+        )
+        (ws_dir / "script.js").write_text("// Project scripts\nconsole.log('Lumora workspace ready');\n", encoding="utf-8")
+
     ws["data"].append({
         "id": ws_id,
         "name": req.name,
         "description": req.description,
-        "path": ".",
+        "path": str(ws_dir),  # absolute path under user-workspaces
         "language": req.language,
         "framework": req.framework,
         "tags": req.tags,
@@ -546,7 +664,7 @@ def create_workspace(req: WorkspaceCreateRequest):
         "theme": "matte-dark",
     })
     _write_workspaces(ws)
-    return {"ok": True, "id": ws_id}
+    return {"ok": True, "id": ws_id, "path": str(ws_dir)}
 
 
 class WorkspaceUpdateRequest(BaseModel):

@@ -149,6 +149,25 @@ async def local_auth_middleware(request: Request, call_next):
 
 
 @app.middleware("http")
+async def _lumora_workspace_middleware(request, call_next):
+    """Bind active user workspace for this request (Files / agent isolation)."""
+    try:
+        from backend.files_router import set_active_workspace
+        ws = request.headers.get("X-Lumora-Workspace") or request.query_params.get("workspace") or ""
+        set_active_workspace(ws)
+        # Also export for agent tools in-process
+        import os
+        if ws:
+            from backend.files_router import USER_WORKSPACES_ROOT
+            os.environ["LUMORA_PROJECT_ROOT"] = str(USER_WORKSPACES_ROOT / ws)
+        else:
+            os.environ.pop("LUMORA_PROJECT_ROOT", None)
+    except Exception:
+        pass
+    return await call_next(request)
+
+
+@app.middleware("http")
 async def _lumora_telemetry_middleware(request, call_next):
     import time
     t0 = time.time()
@@ -180,6 +199,8 @@ class ChatRequest(BaseModel):
     plan: bool = True
     # When true, prefer long-running budget / job tracking (website builds).
     async_mode: bool = False
+    # Active user project workspace id (isolated from Lumora source tree)
+    workspace_id: str = ""
 
 
 class ChatResponse(BaseModel):
@@ -294,6 +315,22 @@ def chat(req: ChatRequest):
         raise HTTPException(status_code=400, detail="message must not be empty")
     if _agent is None:
         raise HTTPException(status_code=503, detail="Agent is not initialised yet")
+
+    # Bind user workspace so tools write into the project, not Lumora source
+    try:
+        from backend.files_router import set_active_workspace, USER_WORKSPACES_ROOT, effective_root
+        import os
+        if req.workspace_id:
+            set_active_workspace(req.workspace_id)
+            os.environ["LUMORA_PROJECT_ROOT"] = str(USER_WORKSPACES_ROOT / req.workspace_id)
+            # Refresh agent module root for this process when possible
+            try:
+                import agent as _agent_mod
+                _agent_mod.PROJECT_ROOT = effective_root()
+            except Exception:
+                pass
+    except Exception:
+        pass
 
     task_id = create_task(req.message.strip()[:80])
     add_activity("coordinator", f"New task: {req.message.strip()[:100]}", "", 0)

@@ -26,6 +26,49 @@ let messageCount = 0;
 // ── API base URL ─────────────────────────────────────────────────────
 const API_BASE = window.location.origin;
 
+// ── Active user project (isolated from Lumora source) ─────────────────
+const WS_KEY = 'lumora_active_workspace';
+let currentWorkspace = null; // { id, name, ... }
+
+function loadStoredWorkspace() {
+  try {
+    const raw = localStorage.getItem(WS_KEY);
+    if (raw) currentWorkspace = JSON.parse(raw);
+  } catch (_) { currentWorkspace = null; }
+}
+function persistWorkspace(ws) {
+  currentWorkspace = ws;
+  try {
+    if (ws) localStorage.setItem(WS_KEY, JSON.stringify(ws));
+    else localStorage.removeItem(WS_KEY);
+  } catch (_) {}
+  updateProjectBadge();
+}
+function apiHeaders(extra = {}) {
+  const h = { ...extra };
+  if (currentWorkspace && currentWorkspace.id) {
+    h['X-Lumora-Workspace'] = currentWorkspace.id;
+  }
+  return h;
+}
+function updateProjectBadge() {
+  const el = document.getElementById('projectBadge');
+  const nameEl = document.getElementById('projectBadgeName');
+  const gen = document.getElementById('genProject');
+  if (currentWorkspace && currentWorkspace.name) {
+    if (el) el.hidden = false;
+    if (nameEl) nameEl.textContent = currentWorkspace.name;
+    if (gen) gen.textContent = currentWorkspace.name;
+  } else {
+    if (el) el.hidden = true;
+    if (nameEl) nameEl.textContent = 'No project';
+    if (gen) gen.textContent = 'None selected';
+  }
+}
+loadStoredWorkspace();
+
+
+
 // ── Sidebar ──────────────────────────────────────────────────────────
 function openSidebar() {
   sidebar.classList.add('open');
@@ -240,10 +283,32 @@ async function sendMessage() {
   showTypingIndicator();
   try {
     const longTask = /build me|landing page|website|scaffold|full stack|create an app|make a website/i.test(text);
+    // Auto-create a project when user asks to build something and none is selected
+    if (longTask && !currentWorkspace) {
+      const nameMatch = text.match(/(?:named|called|for)\s+([A-Za-z0-9][A-Za-z0-9 \-]{1,40})/i);
+      const pname = (nameMatch ? nameMatch[1] : 'New Project').trim().slice(0, 40);
+      try {
+        const cr = await fetch(`${API_BASE}/workspaces`, {
+          method: 'POST',
+          headers: apiHeaders({ 'Content-Type': 'application/json' }),
+          body: JSON.stringify({ name: pname, description: text.slice(0, 120), template: 'html', framework: 'html' }),
+        });
+        if (cr.ok) {
+          const created = await cr.json();
+          persistWorkspace({ id: created.id, name: pname });
+        }
+      } catch (_) {}
+    }
     const res = await fetch(`${API_BASE}/chat`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: text, async_mode: longTask, plan: true }),
+      headers: apiHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({
+        message: text,
+        async_mode: longTask,
+        plan: true,
+        workspace_id: currentWorkspace?.id || '',
+        thread_id: currentWorkspace?.id ? `ws-${currentWorkspace.id}` : 'lumora-api-session',
+      }),
     });
     removeTypingIndicator();
     if (!res.ok) {
@@ -257,6 +322,8 @@ async function sendMessage() {
     }
     appendMessage('ai', reply);
     if (data.activity) renderActivity(data.activity);
+    // Refresh project files after agent work
+    try { if (currentWorkspace) loadFileTree(); } catch (_) {}
     if (data.task_id) {
       const titleEl = document.getElementById('activityTaskTitle');
       if (titleEl) titleEl.textContent = 'Task: ' + (text || '').substring(0, 60);
@@ -375,10 +442,26 @@ function renderTree(nodes, depth = 0) {
 async function loadFileTree() {
   fileTreeEl.innerHTML = `<div class="ft-loading"><svg class="ft-spinner" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>Loading\u2026</div>`;
   try {
-    const res = await fetch(`${API_BASE}/files`);
+    const res = await fetch(`${API_BASE}/files`, { headers: apiHeaders() });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const { files } = await res.json();
-    if (!files.length) { fileTreeEl.innerHTML = '<div class="ft-empty">No files found</div>'; return; }
+    const data = await res.json();
+    const files = data.files || [];
+    if (!currentWorkspace) {
+      fileTreeEl.innerHTML = `<div class="ft-empty ft-empty-project">
+        <strong>No project selected</strong>
+        <p>Create or open a project to see its files. Lumora Dev source files are not shown here.</p>
+        <button type="button" class="pv-btn primary" id="ftOpenProjects">Open Projects</button>
+      </div>`;
+      document.getElementById('ftOpenProjects')?.addEventListener('click', () => {
+        document.querySelector('.sidebar-tab[data-tab="chat"]')?.click();
+        showCreateProject?.();
+      });
+      return;
+    }
+    if (!files.length) {
+      fileTreeEl.innerHTML = `<div class="ft-empty">Project is empty. Ask Lumora in Chat to generate files, or create a file.</div>`;
+      return;
+    }
     fileTreeEl.innerHTML = renderTree(files);
     attachTreeListeners();
     setupFileActionBar();
@@ -666,7 +749,7 @@ async function openFile(path) {
 
   // Load content
   try {
-    const res = await fetch(`${API_BASE}/file?path=${encodeURIComponent(path)}`);
+    const res = await fetch(`${API_BASE}/file?path=${encodeURIComponent(path)}`, { headers: apiHeaders() });
     if (!res.ok) {
       const detail = await res.json().catch(() => ({ detail: res.statusText }));
       throw new Error(detail.detail ?? res.statusText);
@@ -1922,13 +2005,18 @@ function renderWorkspaces(data, query) {
 async function openWorkspace(id) {
   try {
     await fetch(`${API_BASE}/workspaces/${id}`, {
-      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      method: 'PUT', headers: apiHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({}),  // just updates last_opened
     });
     const ws = workspacesData.find(w => w.id === id);
     if (ws) {
-      document.getElementById('sidebarWsName').textContent = ws.name;
-      document.getElementById('sidebarWsIcon').textContent = ws.icon || '📁';
+      persistWorkspace({ id: ws.id, name: ws.name, icon: ws.icon, framework: ws.framework });
+      const sn = document.getElementById('sidebarWsName');
+      const si = document.getElementById('sidebarWsIcon');
+      if (sn) sn.textContent = ws.name;
+      if (si) si.textContent = ws.icon || '📁';
+      try { loadFileTree(); } catch (_) {}
+      try { maybeAutoPreview(); } catch (_) {}
     }
     document.getElementById('dashboard').classList.remove('active');
   } catch (err) { showToast('Failed to open: ' + err.message); }
@@ -1973,12 +2061,16 @@ function createFromTemplate(tpl) {
 async function createWorkspace(name, desc, lang, fw, tpl) {
   try {
     const res = await fetch(`${API_BASE}/workspaces`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: apiHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ name, description: desc, language: lang, framework: fw, template: tpl }),
     });
     if (!res.ok) throw new Error((await res.json()).detail || 'Failed');
-    showToast('Project created!');
+    const created = await res.json();
+    persistWorkspace({ id: created.id, name, icon: '📁', framework: fw });
+    showToast('Project created: ' + name);
     loadWorkspaces();
+    try { loadFileTree(); } catch (_) {}
+    try { maybeAutoPreview(); } catch (_) {}
   } catch (err) { showToast('Create failed: ' + err.message); }
 }
 
@@ -2540,3 +2632,70 @@ messageInput.focus();
     });
   });
 })();
+
+
+/** Prefer index.html in the active project for Preview. */
+async function maybeAutoPreview() {
+  if (!currentWorkspace) return;
+  try {
+    const res = await fetch(`${API_BASE}/files`, { headers: apiHeaders() });
+    if (!res.ok) return;
+    const data = await res.json();
+    const flat = [];
+    (function walk(nodes) {
+      (nodes || []).forEach(n => {
+        if (n.type === 'file') flat.push(n.path);
+        if (n.children) walk(n.children);
+      });
+    })(data.files || []);
+    const entry = flat.find(p => /(^|\/)index\.html$/i.test(p)) || flat.find(p => /\.html$/i.test(p));
+    if (entry) {
+      window.__lumoraPreviewEntry = entry;
+      const hint = document.getElementById('previewEmptyHint');
+      if (hint) {
+        hint.innerHTML = '<p>Entry point detected: <strong>' + entry + '</strong></p>' +
+          '<button type="button" class="pv-btn primary" id="btnOpenPreviewEntry">Open Preview</button>';
+        document.getElementById('btnOpenPreviewEntry')?.addEventListener('click', () => {
+          document.querySelector('.sidebar-tab[data-tab="preview"]')?.click();
+          if (typeof openFile === 'function') openFile(entry);
+        });
+      }
+    }
+  } catch (_) {}
+}
+
+function applyTheme(mode) {
+  const root = document.documentElement;
+  let resolved = mode;
+  if (mode === 'system') {
+    resolved = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+  }
+  root.setAttribute('data-theme', resolved);
+  root.classList.toggle('theme-light', resolved === 'light');
+  try { localStorage.setItem('lumora_theme', mode); } catch (_) {}
+  const sel = document.getElementById('settingTheme');
+  if (sel) sel.value = mode;
+}
+(function initTheme() {
+  let mode = 'dark';
+  try { mode = localStorage.getItem('lumora_theme') || 'dark'; } catch (_) {}
+  applyTheme(mode);
+  document.getElementById('settingTheme')?.addEventListener('change', e => applyTheme(e.target.value));
+  document.getElementById('themeToggleBtn')?.addEventListener('click', () => {
+    const cur = localStorage.getItem('lumora_theme') || 'dark';
+    const next = cur === 'dark' ? 'light' : cur === 'light' ? 'system' : 'dark';
+    applyTheme(next);
+  });
+})();
+
+// Mobile "More" menu
+document.getElementById('moreTabsBtn')?.addEventListener('click', () => {
+  document.getElementById('moreTabsSheet')?.classList.toggle('open');
+});
+document.querySelectorAll('#moreTabsSheet [data-tab]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const tab = btn.getAttribute('data-tab');
+    document.querySelector(`.sidebar-tab[data-tab="${tab}"]`)?.click();
+    document.getElementById('moreTabsSheet')?.classList.remove('open');
+  });
+});

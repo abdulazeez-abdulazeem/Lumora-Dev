@@ -63,7 +63,10 @@ _MAX_READ_CHARS = 15000
 def _safe_resolve(rel: str) -> Path | None:
     """Resolve *rel* under PROJECT_ROOT. Returns None if outside root or protected."""
     try:
-        root = PROJECT_ROOT.resolve()
+        # Prefer live env so /chat can retarget the agent to the active workspace
+        import os
+        env_root = os.environ.get("LUMORA_PROJECT_ROOT")
+        root = Path(env_root).resolve() if env_root else PROJECT_ROOT.resolve()
         target = (root / (rel or ".")).resolve()
         try:
             target.relative_to(root)

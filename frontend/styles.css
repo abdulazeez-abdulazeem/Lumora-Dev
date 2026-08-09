@@ -2203,3 +2203,137 @@ body::after {
     opacity: 0.25;
   }
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   UX AUDIT — project badge, mobile nav (More), light theme, workspace hints
+   Additive only; preserves prior mobile shell + terminal absolute fixes.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.project-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 8px;
+  padding: 3px 10px;
+  border-radius: 99px;
+  background: var(--accent-soft);
+  border: 1px solid rgba(139, 92, 246, 0.28);
+  max-width: min(180px, 42vw);
+  overflow: hidden;
+}
+.project-badge-label {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.project-badge-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent-light);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.files-workspace-hint {
+  font-size: 11px;
+  color: var(--text-3);
+  padding: 8px 10px 4px;
+  line-height: 1.4;
+}
+.ft-empty-project {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 16px 12px;
+  color: var(--text-2);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.ft-empty-project strong { color: var(--text-1); }
+
+/* Desktop: show all tabs; Mobile: primary + More only */
+.tab-more-btn { display: none; }
+
+.more-sheet {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  background: rgba(0, 0, 0, 0.55);
+  align-items: flex-end;
+  justify-content: center;
+}
+.more-sheet.open { display: flex; }
+.more-sheet-inner {
+  width: 100%;
+  max-width: 480px;
+  background: var(--bg-2);
+  border: 1px solid var(--glass-border);
+  border-radius: 16px 16px 0 0;
+  padding: 12px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  padding-bottom: max(16px, env(safe-area-inset-bottom));
+}
+.more-sheet-inner button {
+  min-height: 44px;
+  border-radius: 10px;
+  border: 1px solid var(--glass-border);
+  background: var(--glass-bg);
+  color: var(--text-1);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+@media (max-width: 768px) {
+  .sidebar-tabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .sidebar-tabs::-webkit-scrollbar { display: none; }
+
+  .sidebar-tab.tab-secondary { display: none !important; }
+  .sidebar-tab.tab-more-btn { display: flex !important; }
+
+  .sidebar-tab.tab-primary,
+  .sidebar-tab.tab-more-btn {
+    flex: 1 0 auto;
+    min-width: 64px;
+    min-height: 40px;
+  }
+
+  .project-badge { max-width: 28vw; }
+  .nav-badge { display: none; }
+}
+
+/* Light theme (preserves DarkVeil underlay; panels become light glass) */
+html.theme-light {
+  --bg: #f4f4f5;
+  --bg-2: #ffffff;
+  --bg-3: #fafafa;
+  --glass-bg: rgba(255, 255, 255, 0.72);
+  --glass-bg-2: rgba(255, 255, 255, 0.9);
+  --glass-border: rgba(0, 0, 0, 0.08);
+  --glass-border-2: rgba(0, 0, 0, 0.12);
+  --text-1: #18181b;
+  --text-2: #52525b;
+  --text-3: #71717a;
+  --blur: blur(16px);
+}
+html.theme-light body { background: var(--bg); color: var(--text-1); }
+html.theme-light .sidebar { background: rgba(255,255,255,0.92); }
+html.theme-light .topnav { background: rgba(255,255,255,0.85); }
+
+/* Settings select */
+.settings-panel .pv-select {
+  max-width: 160px;
+}
