@@ -311,7 +311,7 @@ def chat(req: ChatRequest):
     long_task = req.async_mode or jobs_mod.is_long_running_request(req.message)
     # Leave margin under Vercel maxDuration (300s configured).
     time_budget_s = 260 if long_task else 50
-    recursion_limit = 50 if long_task else 25
+    recursion_limit = 40 if long_task else 12
     config = {
         "configurable": {"thread_id": thread_id},
         "recursion_limit": recursion_limit,
@@ -339,8 +339,18 @@ def chat(req: ChatRequest):
     t0 = time.time()
     result = {"messages": []}
     timed_out = False
+
+    def _state_messages():
+        try:
+            st = _agent.get_state(config)
+            if st and getattr(st, "values", None):
+                return st.values.get("messages") or []
+        except Exception:
+            pass
+        return []
+
     try:
-        # Short tasks: classic invoke (reliable). Long tasks: stream with wall-clock budget
+        # Short tasks: classic invoke. Long tasks: stream with wall-clock budget
         # so we can return partial output before Vercel hard-kills at maxDuration.
         deadline = t0 + time_budget_s
         if long_task and hasattr(_agent, "stream"):
@@ -383,22 +393,33 @@ def chat(req: ChatRequest):
             pass
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception as exc:
-        logger.exception("Agent invoke failed")
-        complete_task(task_id, "failed")
-        memory_mod.record_task_summary(task_id, req.message.strip()[:80], "failed", str(exc))
-        if plan_id:
+        name = type(exc).__name__
+        # Agent tool loops (GraphRecursionError): return best-effort partial text instead of 502.
+        if name == "GraphRecursionError" or "Recursion limit" in str(exc):
+            logger.warning("Agent recursion limit hit — returning partial: %s", exc)
+            timed_out = True
+            msgs = result.get("messages") if isinstance(result, dict) else None
+            if not msgs:
+                msgs = _state_messages()
+            result = {"messages": msgs or []}
+            add_activity("coordinator", "Agent step limit reached — partial result", "", 80)
+        else:
+            logger.exception("Agent invoke failed")
+            complete_task(task_id, "failed")
+            memory_mod.record_task_summary(task_id, req.message.strip()[:80], "failed", str(exc))
+            if plan_id:
+                try:
+                    planner_mod.fail_step(plan_id, str(exc))
+                except Exception:
+                    pass
+            add_activity("coordinator", f"Task failed: {exc}", "", 0)
             try:
-                planner_mod.fail_step(plan_id, str(exc))
+                job["status"] = "failed"
+                job["error"] = str(exc)
+                jobs_mod.save_job(job)
             except Exception:
                 pass
-        add_activity("coordinator", f"Task failed: {exc}", "", 0)
-        try:
-            job["status"] = "failed"
-            job["error"] = str(exc)
-            jobs_mod.save_job(job)
-        except Exception:
-            pass
-        raise HTTPException(status_code=502, detail=f"Agent error: {exc}") from exc
+            raise HTTPException(status_code=502, detail=f"Agent error: {exc}") from exc
 
     elapsed_ms = int((time.time() - t0) * 1000)
     response_text = ""
