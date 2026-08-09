@@ -1,12 +1,13 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "fluid": true,
   "functions": {
     "app.py": {
-      "maxDuration": 60,
+      "maxDuration": 300,
       "includeFiles": "{frontend/**,backend/**,agent.py,server.py}"
     },
     "api/index.py": {
-      "maxDuration": 60,
+      "maxDuration": 300,
       "includeFiles": "{frontend/**,backend/**,agent.py,server.py}"
     }
   }

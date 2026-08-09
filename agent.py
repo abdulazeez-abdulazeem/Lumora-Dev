@@ -34,7 +34,22 @@ except Exception:
 # ------------------------------------------------------------
 # Project root (the folder where the agent is running)
 # ------------------------------------------------------------
-PROJECT_ROOT = Path.cwd()
+def _resolve_project_root() -> Path:
+    """Local/Docker: CWD. Vercel: writable /tmp workspace (deployment FS is read-only)."""
+    import os
+    override = os.environ.get("LUMORA_PROJECT_ROOT")
+    if override:
+        p = Path(override)
+        p.mkdir(parents=True, exist_ok=True)
+        return p
+    if os.environ.get("LUMORA_RUNTIME") == "vercel":
+        p = Path("/tmp/lumora-workspace")
+        p.mkdir(parents=True, exist_ok=True)
+        return p
+    return Path.cwd()
+
+
+PROJECT_ROOT = _resolve_project_root()
 
 # Directories / files the agent must not touch
 _AGENT_IGNORE_DIRS = {

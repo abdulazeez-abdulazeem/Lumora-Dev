@@ -239,10 +239,11 @@ async function sendMessage() {
   await delay(300);
   showTypingIndicator();
   try {
+    const longTask = /build me|landing page|website|scaffold|full stack|create an app|make a website/i.test(text);
     const res = await fetch(`${API_BASE}/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: text }),
+      body: JSON.stringify({ message: text, async_mode: longTask, plan: true }),
     });
     removeTypingIndicator();
     if (!res.ok) {
@@ -250,10 +251,15 @@ async function sendMessage() {
       throw new Error(`${res.status}: ${detail}`);
     }
     const data = await res.json();
-    appendMessage('ai', data.response ?? '(empty response)');
+    let reply = data.response ?? '(empty response)';
+    if (data.partial || data.status === 'timed_out') {
+      reply += '\n\n_Partial result (time budget). Send a follow-up to continue._';
+    }
+    appendMessage('ai', reply);
     if (data.activity) renderActivity(data.activity);
     if (data.task_id) {
-      document.getElementById('activityTaskTitle').textContent = 'Task: ' + (data.response || '').substring(0, 60);
+      const titleEl = document.getElementById('activityTaskTitle');
+      if (titleEl) titleEl.textContent = 'Task: ' + (text || '').substring(0, 60);
     }
   } catch (err) {
     removeTypingIndicator();

@@ -11,11 +11,24 @@ import logging
 from typing import Optional
 
 ROOT = Path(__file__).resolve().parent.parent
-INDEX_FILE = ROOT / ".codebase-index.json"
+def _index_file() -> Path:
+    preferred = ROOT / ".codebase-index.json"
+    try:
+        preferred.parent.mkdir(parents=True, exist_ok=True)
+        probe = preferred.parent / ".lumora-idx-probe"
+        probe.write_text("ok", encoding="utf-8")
+        probe.unlink(missing_ok=True)
+        return preferred
+    except OSError:
+        p = Path("/tmp/lumora-codebase-index.json")
+        return p
+
+INDEX_FILE = _index_file()
 logger = logging.getLogger("lumora.indexer")
 
 IGNORE_DIRS = {".git", "venv", "__pycache__", "node_modules", ".cache", ".local", ".agents", ".pythonlibs", "__pycache__",
-               ".nexus", "dist", "build", ".next"}
+               ".nexus", "dist", "build", ".next", "_vendor", ".vercel", "site-packages",
+               "lumora_timeout", ".npm", ".pnpm"}
 IGNORE_EXTENSIONS = {".ico", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".woff", ".woff2", ".ttf", ".eot", ".map",
                      ".pyc", ".lock", ".min.js", ".min.css"}
 
@@ -179,21 +192,48 @@ def index_project(force: bool = False) -> dict:
     file_list = []
     logger.info("Indexing project at %s (force=%s)", ROOT, force)
 
-    # Walk the project tree
-    for entry in sorted(ROOT.rglob("*")):
-        if entry.is_dir():
-            if entry.name in IGNORE_DIRS or any(p in IGNORE_DIRS for p in entry.parts):
+    # Scan roots: on Vercel avoid walking /var/task/_vendor (massive timeout source).
+    import os
+    scan_roots = [ROOT]
+    if os.environ.get("LUMORA_RUNTIME") == "vercel":
+        candidates = [
+            Path("/tmp/lumora-workspace"),
+            ROOT / "frontend",
+            ROOT / "backend",
+            ROOT / "agent.py",
+        ]
+        scan_roots = [p for p in candidates if p.exists()]
+        if not scan_roots:
+            scan_roots = [ROOT]
+
+    def _walk(base: Path):
+        if base.is_file():
+            yield base
+            return
+        for entry in sorted(base.rglob("*")):
+            if entry.is_dir():
                 continue
-            continue
-        if entry.suffix in IGNORE_EXTENSIONS:
-            continue
-        if entry.name.startswith("."):
-            continue
-        rel = str(entry.relative_to(ROOT))
-        file_list.append(rel)
-        extractor = LANG_EXTRACTORS.get(entry.suffix)
-        if extractor:
-            symbols.extend(extractor(entry))
+            if any(part in IGNORE_DIRS for part in entry.parts):
+                continue
+            if entry.suffix in IGNORE_EXTENSIONS:
+                continue
+            if entry.name.startswith("."):
+                continue
+            yield entry
+
+    for root in scan_roots:
+        for entry in _walk(root):
+            try:
+                rel = str(entry.relative_to(ROOT))
+            except ValueError:
+                rel = str(entry)
+            file_list.append(rel)
+            extractor = LANG_EXTRACTORS.get(entry.suffix)
+            if extractor:
+                try:
+                    symbols.extend(extractor(entry))
+                except Exception:
+                    pass
 
     graph = _build_dependency_graph(symbols)
 
@@ -211,7 +251,10 @@ def index_project(force: bool = False) -> dict:
         "stats": stats,
         "indexed_at": time.time(),
     }
-    INDEX_FILE.write_text(json.dumps(index, indent=2), encoding="utf-8")
+    try:
+        INDEX_FILE.write_text(json.dumps(index, indent=2), encoding="utf-8")
+    except OSError as e:
+        logger.warning("Could not persist index: %s", e)
     logger.info(
         "Indexed %s files, %s symbols",
         index["stats"].get("total_files", 0),

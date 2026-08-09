@@ -83,6 +83,7 @@ from backend.codebase_indexer import (
 from backend import memory as memory_mod
 from backend import planner as planner_mod
 from backend import edit_session as edit_mod
+from backend import jobs as jobs_mod
 from backend.security import (
     is_auth_enabled, login as security_login, set_password, clear_password,
     validate_session, create_session,
@@ -177,6 +178,8 @@ class ChatRequest(BaseModel):
     message: str
     thread_id: str = "lumora-api-session"
     plan: bool = True
+    # When true, prefer long-running budget / job tracking (website builds).
+    async_mode: bool = False
 
 
 class ChatResponse(BaseModel):
@@ -184,6 +187,9 @@ class ChatResponse(BaseModel):
     task_id: str = ""
     plan_id: str = ""
     activity: list = []
+    status: str = "completed"  # completed | timed_out | failed | running
+    job_id: str = ""
+    partial: bool = False
 
 
 class ActivityResponse(BaseModel):
@@ -302,20 +308,61 @@ def chat(req: ChatRequest):
         add_activity("planner", f"Plan {plan_id}: {len(steps)} steps", steps[0] if steps else "", 5)
 
     thread_id = req.thread_id or "lumora-api-session"
-    config = {"configurable": {"thread_id": thread_id}}
+    long_task = req.async_mode or jobs_mod.is_long_running_request(req.message)
+    # Leave margin under Vercel maxDuration (300s configured).
+    time_budget_s = 260 if long_task else 50
+    recursion_limit = 50 if long_task else 25
+    config = {
+        "configurable": {"thread_id": thread_id},
+        "recursion_limit": recursion_limit,
+    }
+
+    job = jobs_mod.create_job(req.message, thread_id=thread_id, task_id=task_id)
+    job["status"] = "running"
+    jobs_mod.save_job(job)
+    job_id = job["id"]
 
     # Inject memory context as a prefix message for this turn
     mem_ctx = memory_mod.memory_context_for_agent()
     user_content = req.message
     if mem_ctx:
         user_content = f"{mem_ctx}\n\n### User request\n{req.message}"
+    if long_task:
+        user_content += (
+            "\n\n### Runtime constraints\n"
+            "You are running on a time-limited serverless host. "
+            "Complete the website with a small set of focused files "
+            "(e.g. index.html, styles.css, script.js). "
+            "Prefer write_file over long exploration. Avoid browser tools unless required."
+        )
 
     t0 = time.time()
+    result = {"messages": []}
+    timed_out = False
     try:
-        result = _agent.invoke(
-            {"messages": [HumanMessage(content=user_content)]},
-            config=config,
-        )
+        # Stream values so we can stop before hard platform kill (504).
+        deadline = t0 + time_budget_s
+        if hasattr(_agent, "stream"):
+            for event in _agent.stream(
+                {"messages": [HumanMessage(content=user_content)]},
+                config=config,
+                stream_mode="values",
+            ):
+                result = event
+                if time.time() >= deadline:
+                    timed_out = True
+                    add_activity(
+                        "coordinator",
+                        f"Time budget {time_budget_s}s reached — returning partial result",
+                        "",
+                        80,
+                    )
+                    break
+        else:
+            result = _agent.invoke(
+                {"messages": [HumanMessage(content=user_content)]},
+                config=config,
+            )
     except ValueError as exc:
         logger.warning("Agent configuration error: %s", exc)
         complete_task(task_id, "failed")
@@ -326,6 +373,12 @@ def chat(req: ChatRequest):
             except Exception:
                 pass
         add_activity("coordinator", f"Task failed: {exc}", "", 0)
+        try:
+            job["status"] = "failed"
+            job["error"] = str(exc)
+            jobs_mod.save_job(job)
+        except Exception:
+            pass
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception as exc:
         logger.exception("Agent invoke failed")
@@ -337,6 +390,12 @@ def chat(req: ChatRequest):
             except Exception:
                 pass
         add_activity("coordinator", f"Task failed: {exc}", "", 0)
+        try:
+            job["status"] = "failed"
+            job["error"] = str(exc)
+            jobs_mod.save_job(job)
+        except Exception:
+            pass
         raise HTTPException(status_code=502, detail=f"Agent error: {exc}") from exc
 
     elapsed_ms = int((time.time() - t0) * 1000)
@@ -373,12 +432,45 @@ def chat(req: ChatRequest):
             except Exception:
                 pass
 
+    status = "timed_out" if timed_out else "completed"
+    job["status"] = status
+    job["response"] = response_text
+    job["elapsed_ms"] = elapsed_ms
+    job["progress"] = 80 if timed_out else 100
+    job["partial"] = timed_out
+    jobs_mod.save_job(job)
+
+    if timed_out:
+        complete_task(task_id, "completed")
+        response_text = (
+            response_text
+            + "\n\n---\n_Note: Generation hit the serverless time budget. "
+            "Partial work above is preserved. Re-send a follow-up like "
+            "\"continue the Midnight Brew site\" to resume on the same thread._"
+        )
+
     return {
         "response": response_text,
         "task_id": task_id,
         "plan_id": plan_id,
         "activity": get_activity(-20),
+        "status": status,
+        "job_id": job_id,
+        "partial": timed_out,
     }
+
+
+@app.get("/jobs/{job_id}")
+def get_job(job_id: str):
+    job = jobs_mod.load_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return job
+
+
+@app.get("/jobs")
+def list_jobs(limit: int = 20):
+    return {"jobs": jobs_mod.list_recent_jobs(limit)}
 
 
 @app.get("/activity", response_model=ActivityResponse)
