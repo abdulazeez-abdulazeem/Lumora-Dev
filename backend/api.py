@@ -340,15 +340,17 @@ def chat(req: ChatRequest):
     result = {"messages": []}
     timed_out = False
     try:
-        # Stream values so we can stop before hard platform kill (504).
+        # Short tasks: classic invoke (reliable). Long tasks: stream with wall-clock budget
+        # so we can return partial output before Vercel hard-kills at maxDuration.
         deadline = t0 + time_budget_s
-        if hasattr(_agent, "stream"):
+        if long_task and hasattr(_agent, "stream"):
             for event in _agent.stream(
                 {"messages": [HumanMessage(content=user_content)]},
                 config=config,
                 stream_mode="values",
             ):
-                result = event
+                if isinstance(event, dict) and event.get("messages"):
+                    result = event
                 if time.time() >= deadline:
                     timed_out = True
                     add_activity(
@@ -406,8 +408,14 @@ def chat(req: ChatRequest):
             break
 
     if not response_text:
-        complete_task(task_id, "failed")
-        raise HTTPException(status_code=502, detail="Agent returned no response")
+        if timed_out:
+            response_text = (
+                "Work started but no final assistant message was produced before the "
+                "serverless time budget. Send a follow-up message to continue."
+            )
+        else:
+            complete_task(task_id, "failed")
+            raise HTTPException(status_code=502, detail="Agent returned no response")
 
     try:
         parse_agent_response(response_text, task_id)
