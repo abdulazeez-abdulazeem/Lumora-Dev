@@ -419,7 +419,16 @@ def chat(req: ChatRequest):
                 jobs_mod.save_job(job)
             except Exception:
                 pass
-            raise HTTPException(status_code=502, detail=f"Agent error: {exc}") from exc
+            detail = str(exc)
+            code = 502
+            if "429" in detail or "Rate limit" in detail or "rate limit" in detail.lower():
+                code = 503
+                detail = (
+                    "OpenRouter rate limit exceeded (free-tier daily quota). "
+                    "Wait for reset or add credits / switch MODEL. "
+                    f"Original: {exc}"
+                )
+            raise HTTPException(status_code=code, detail=detail) from exc
 
     elapsed_ms = int((time.time() - t0) * 1000)
     response_text = ""
