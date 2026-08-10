@@ -909,7 +909,7 @@ async function saveCurrentFile() {
   try {
     const res = await fetch(`${API_BASE}/file`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: apiHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ path: tab.path, content }),
     });
     if (!res.ok) {
@@ -1151,24 +1151,56 @@ document.getElementById('pvExternal').addEventListener('click', openPreviewExter
 document.getElementById('pvClose').addEventListener('click', closePreview);
 
 // ── Open preview ───────────────────────────────────────────────────────
-function openPreview(filePath) {
-  const path = filePath || previewCurrentPath;
+async function openPreview(filePath) {
+  previewPanel.classList.add('open');
+  let path = filePath || previewCurrentPath || window.__lumoraPreviewEntry || null;
+
+  if (!path && editorActiveIndex >= 0) {
+    const tab = editorTabs[editorActiveIndex];
+    if (tab && isHTMLFile(tab.path)) path = tab.path;
+  }
+
+  if (!path) {
+    path = await findProjectEntryHtml();
+  }
+
   if (path) {
-    previewPanel.classList.add('open');
     loadPreview(path);
+    return;
+  }
+
+  if (!currentWorkspace) {
+    showPreviewError(
+      'No project yet',
+      'Ask Lumora Dev to create a project or open an existing project. Preview never shows Lumora source files.'
+    );
   } else {
-    // If no path, try to find the currently active HTML file
-    if (editorActiveIndex >= 0) {
-      const tab = editorTabs[editorActiveIndex];
-      if (isPreviewableFile(tab.path)) {
-        loadPreview(tab.path);
-        previewPanel.classList.add('open');
-        return;
-      }
-    }
-    // Show just the panel with an error message
-    previewPanel.classList.add('open');
-    showPreviewError('No file selected', 'Open an HTML, CSS or JS file to preview it, or select a file from the explorer.');
+    showPreviewError(
+      'No index.html found',
+      'This project has no HTML entry point yet. Ask the agent to generate a website, or create index.html in Files.'
+    );
+  }
+}
+
+async function findProjectEntryHtml() {
+  if (!currentWorkspace) return null;
+  try {
+    const res = await fetch(`${API_BASE}/files`, { headers: apiHeaders() });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const flat = [];
+    (function walk(nodes) {
+      (nodes || []).forEach(n => {
+        if (n.type === 'file') flat.push(n.path);
+        if (n.children) walk(n.children);
+      });
+    })(data.files || []);
+    const entry = flat.find(p => /(^|\/)index\.html$/i.test(p))
+      || flat.find(p => /\.html?$/i.test(p));
+    if (entry) window.__lumoraPreviewEntry = entry;
+    return entry || null;
+  } catch (_) {
+    return null;
   }
 }
 
@@ -1191,62 +1223,135 @@ function isHTMLFile(path) {
 // ── Load preview ───────────────────────────────────────────────────────
 async function loadPreview(path) {
   if (!path) return;
-  previewCurrentPath = path;
+  // Prefer HTML entry for CSS/JS side-opens
+  let entryPath = path;
+  if (!isHTMLFile(path)) {
+    entryPath = window.__lumoraPreviewEntry || await findProjectEntryHtml() || path;
+  }
+  if (isHTMLFile(path)) {
+    previewCurrentPath = path;
+    window.__lumoraPreviewEntry = path;
+  } else if (isHTMLFile(entryPath)) {
+    previewCurrentPath = entryPath;
+  } else {
+    previewCurrentPath = path;
+  }
   hidePreviewError();
 
   try {
-    const res = await fetch(`${API_BASE}/file?path=${encodeURIComponent(path)}`);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const { content } = await res.json();
-
-    if (isHTMLFile(path)) {
-      // Serve HTML as a full page
-      previewIframe.style.display = '';
-      loadPreviewHTML(content, path);
-    } else if (path.endsWith('.css')) {
-      // Inject CSS into current preview
-      previewIframe.style.display = '';
-      if (previewCurrentPath && isHTMLFile(previewCurrentPath)) {
-        // Reload the HTML to apply CSS changes
-        const htmlRes = await fetch(`${API_BASE}/file?path=${encodeURIComponent(previewCurrentPath)}`);
-        if (htmlRes.ok) {
-          const { content: htmlContent } = await htmlRes.json();
-          loadPreviewHTML(htmlContent, previewCurrentPath);
-        }
-      } else {
-        showPreviewError('Cannot preview CSS alone', 'Open an HTML file first, then open the CSS file.');
-      }
-    } else if (path.endsWith('.js')) {
-      previewIframe.style.display = '';
-      if (previewCurrentPath && isHTMLFile(previewCurrentPath)) {
-        const htmlRes = await fetch(`${API_BASE}/file?path=${encodeURIComponent(previewCurrentPath)}`);
-        if (htmlRes.ok) {
-          const { content: htmlContent } = await htmlRes.json();
-          loadPreviewHTML(htmlContent, previewCurrentPath);
-        }
-      } else {
-        showPreviewError('Cannot preview JS alone', 'Open an HTML file first, then open the JS file.');
-      }
-    } else {
-      // Other files — show raw content
-      showPreviewError('Not previewable', `${path.split('.').pop()?.toUpperCase()} files cannot be live-previewed. Open an HTML file instead.`);
+    if (!currentWorkspace) {
+      showPreviewError('No project selected', 'Open or create a user project first. Preview never shows Lumora Dev source.');
       previewIframe.style.display = 'none';
+      return;
     }
+
+    if (!isHTMLFile(previewCurrentPath)) {
+      showPreviewError(
+        'No index.html found',
+        'Open or create index.html in this project to use Preview.'
+      );
+      previewIframe.style.display = 'none';
+      return;
+    }
+
+    const res = await fetch(
+      `${API_BASE}/file?path=${encodeURIComponent(previewCurrentPath)}`,
+      { headers: apiHeaders() }
+    );
+    if (!res.ok) throw new Error(`Could not load ${previewCurrentPath} (HTTP ${res.status})`);
+    const { content } = await res.json();
+    previewIframe.style.display = '';
+    await loadPreviewHTML(content, previewCurrentPath);
   } catch (err) {
-    showPreviewError('Failed to load', err.message);
+    showPreviewError('Failed to load preview', err.message || String(err));
     previewIframe.style.display = 'none';
   }
 }
 
-function loadPreviewHTML(htmlContent, basePath) {
-  // Strip file tools / non-browser code from the HTML
-  let cleaned = htmlContent;
+/** Resolve relative asset path against the HTML file directory. */
+function resolveProjectAsset(basePath, href) {
+  if (!href || /^(https?:|data:|blob:|mailto:|javascript:)/i.test(href)) return null;
+  if (href.startsWith('//')) return null;
+  // Block path traversal
+  if (href.includes('..')) return null;
+  const baseDir = basePath.includes('/') ? basePath.replace(/\/[^/]*$/, '') : '';
+  let rel = href.replace(/^\.\//, '').replace(/^\//, '');
+  if (baseDir) rel = baseDir + '/' + rel;
+  rel = rel.replace(/\/+/g, '/');
+  return rel;
+}
 
-  // Build a blob with the content
-  const blob = new Blob([cleaned], { type: 'text/html' });
-  if (previewBlobUrl) URL.revokeObjectURL(previewBlobUrl);
-  previewBlobUrl = URL.createObjectURL(blob);
-  previewIframe.src = previewBlobUrl;
+async function fetchWorkspaceText(relPath) {
+  const res = await fetch(
+    `${API_BASE}/file?path=${encodeURIComponent(relPath)}`,
+    { headers: apiHeaders() }
+  );
+  if (!res.ok) return null;
+  const data = await res.json();
+  return data.content ?? null;
+}
+
+/**
+ * Rewrite project HTML so CSS/JS resolve from the active workspace.
+ * Blob URLs cannot pass X-Lumora-Workspace, so assets are inlined.
+ */
+async function loadPreviewHTML(htmlContent, basePath) {
+  let html = htmlContent || '';
+
+  // Inline <link rel="stylesheet" href="...">
+  const linkRe = /<link\b[^>]*rel=["']stylesheet["'][^>]*>/gi;
+  const links = [...html.matchAll(linkRe)];
+  for (const m of links) {
+    const tag = m[0];
+    const hm = tag.match(/href=["']([^"']+)["']/i);
+    if (!hm) continue;
+    const rel = resolveProjectAsset(basePath, hm[1]);
+    if (!rel) continue;
+    const css = await fetchWorkspaceText(rel);
+    if (css == null) continue;
+    html = html.replace(tag, `<style data-lumora-src="${rel}">\n${css}\n</style>`);
+  }
+
+  // Inline <script src="..."> (keep type=module as external skip)
+  const scriptRe = /<script\b([^>]*)src=["']([^"']+)["']([^>]*)><\/script>/gi;
+  const scripts = [...html.matchAll(scriptRe)];
+  for (const m of scripts) {
+    const full = m[0];
+    const attrs = (m[1] || '') + (m[3] || '');
+    if (/\btype=["']module["']/i.test(attrs)) continue;
+    const rel = resolveProjectAsset(basePath, m[2]);
+    if (!rel) continue;
+    const code = await fetchWorkspaceText(rel);
+    if (code == null) continue;
+    html = html.replace(full, `<script data-lumora-src="${rel}">\n${code}\n</script>`);
+  }
+
+  // srcdoc is more reliable than blob for sandbox + inlined assets
+  if (previewBlobUrl) { URL.revokeObjectURL(previewBlobUrl); previewBlobUrl = null; }
+  try {
+    previewIframe.removeAttribute('src');
+    previewIframe.srcdoc = html;
+  } catch (err) {
+    const blob = new Blob([html], { type: 'text/html' });
+    previewBlobUrl = URL.createObjectURL(blob);
+    previewIframe.removeAttribute('srcdoc');
+    previewIframe.src = previewBlobUrl;
+  }
+}
+
+/** Refresh preview from the active project entry (debounced). */
+function schedulePreviewRefresh() {
+  if (!previewAutoReload) return;
+  if (previewReloadDebounce) clearTimeout(previewReloadDebounce);
+  previewReloadDebounce = setTimeout(async () => {
+    if (!previewPanel.classList.contains('open') && !document.getElementById('previewTab')?.classList.contains('active')) {
+      // Still refresh entry pointer for when user opens preview
+    }
+    const entry = window.__lumoraPreviewEntry || await findProjectEntryHtml();
+    if (entry && previewPanel.classList.contains('open')) {
+      loadPreview(entry);
+    }
+  }, 450);
 }
 
 function reloadPreview() {
@@ -1264,16 +1369,15 @@ function notifyPreviewSaved(path) {
   if (previewReloadDebounce) clearTimeout(previewReloadDebounce);
   previewReloadDebounce = setTimeout(() => {
     if (isHTMLFile(path)) {
-      // HTML file saved — full reload
       loadPreview(path);
-    } else if (previewCurrentPath && isHTMLFile(previewCurrentPath)) {
-      // CSS/JS file saved — reload the HTML to pick up changes
-      const htmlRes = fetch(`${API_BASE}/file?path=${encodeURIComponent(previewCurrentPath)}`)
-        .then(res => res.json())
-        .then(data => loadPreviewHTML(data.content, previewCurrentPath))
-        .catch(() => {});
+    } else {
+      const entry = previewCurrentPath && isHTMLFile(previewCurrentPath)
+        ? previewCurrentPath
+        : (window.__lumoraPreviewEntry || null);
+      if (entry) loadPreview(entry);
+      else schedulePreviewRefresh();
     }
-  }, 500);
+  }, 450);
 }
 
 // Hook into saveCurrentFile to trigger preview reload
@@ -1333,10 +1437,31 @@ function changeZoom(zoom) {
 }
 
 // ── Open in new tab ─────────────────────────────────────────────────────
-function openPreviewExternal() {
+async function openPreviewExternal() {
   if (!previewCurrentPath) { showToast('No preview to open'); return; }
-  const url = `${API_BASE}/file?path=${encodeURIComponent(previewCurrentPath)}`;
-  window.open(url, '_blank');
+  try {
+    const res = await fetch(
+      `${API_BASE}/file?path=${encodeURIComponent(previewCurrentPath)}`,
+      { headers: apiHeaders() }
+    );
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const { content } = await res.json();
+    // Rebuild inlined document for a standalone tab
+    let html = content;
+    // Reuse inlining via temporary approach: set srcdoc on a blank page is hard;
+    // open a blob after the same inlining path.
+    const iframe = document.createElement('iframe');
+    iframe.style.display = 'none';
+    document.body.appendChild(iframe);
+    await loadPreviewHTML(content, previewCurrentPath);
+    const doc = previewIframe.srcdoc || content;
+    const blob = new Blob([doc], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    window.open(url, '_blank');
+    iframe.remove();
+  } catch (err) {
+    showToast('Could not open preview: ' + (err.message || err));
+  }
 }
 
 // ── Error display ───────────────────────────────────────────────────────
@@ -2055,6 +2180,7 @@ async function openWorkspace(id) {
       if (si) si.textContent = ws.icon || '📁';
       try { loadFileTree(); } catch (_) {}
       try { maybeAutoPreview(); } catch (_) {}
+      try { schedulePreviewRefresh(); } catch (_) {}
     }
     document.getElementById('dashboard').classList.remove('active');
   } catch (err) { showToast('Failed to open: ' + err.message); }
@@ -2676,41 +2802,24 @@ messageInput.focus();
 async function maybeAutoPreview() {
   if (!currentWorkspace) return;
   try {
-    const res = await fetch(`${API_BASE}/files`, { headers: apiHeaders() });
-    if (!res.ok) return;
-    const data = await res.json();
-    const flat = [];
-    (function walk(nodes) {
-      (nodes || []).forEach(n => {
-        if (n.type === 'file') flat.push(n.path);
-        if (n.children) walk(n.children);
+    const entry = await findProjectEntryHtml();
+    if (!entry) return;
+    window.__lumoraPreviewEntry = entry;
+    const hint = document.getElementById('previewEmptyHint');
+    if (hint) {
+      hint.innerHTML = '<p>Entry point detected: <strong>' + entry + '</strong></p>' +
+        '<button type="button" class="pv-btn primary" id="btnOpenPreviewEntry">Open Preview</button>';
+      document.getElementById('btnOpenPreviewEntry')?.addEventListener('click', () => {
+        document.querySelector('.sidebar-tab[data-tab="preview"]')?.click();
+        openPreview(entry);
       });
-    })(data.files || []);
-    const entry = flat.find(p => /(^|\/)index\.html$/i.test(p)) || flat.find(p => /\.html$/i.test(p));
-    if (entry) {
-      window.__lumoraPreviewEntry = entry;
-      const hint = document.getElementById('previewEmptyHint');
-      if (hint) {
-        hint.innerHTML = '<p>Entry point detected: <strong>' + entry + '</strong></p>' +
-          '<button type="button" class="pv-btn primary" id="btnOpenPreviewEntry">Open Preview</button>';
-        document.getElementById('btnOpenPreviewEntry')?.addEventListener('click', () => {
-          document.querySelector('.sidebar-tab[data-tab="preview"]')?.click();
-          if (typeof openFile === 'function') openFile(entry);
-        });
-      }
+    }
+    if (previewPanel && previewPanel.classList.contains('open')) {
+      schedulePreviewRefresh();
     }
   } catch (_) {}
 }
 
-function getSavedThemeMode() {
-  try {
-    return localStorage.getItem('lumora-theme')
-      || localStorage.getItem('lumora_theme')
-      || 'dark';
-  } catch (_) {
-    return 'dark';
-  }
-}
 
 function applyTheme(mode) {
   const root = document.documentElement;
@@ -2975,6 +3084,7 @@ async function driveJobTicks(jobId, options = {}) {
       }
       try { loadFileTree(); } catch (_) {}
       try { maybeAutoPreview(); } catch (_) {}
+      try { schedulePreviewRefresh(); } catch (_) {}
 
       if (job.status === 'completed') {
         renderCompleted(job);
