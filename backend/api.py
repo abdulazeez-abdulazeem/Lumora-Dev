@@ -208,9 +208,10 @@ class ChatResponse(BaseModel):
     task_id: str = ""
     plan_id: str = ""
     activity: list = []
-    status: str = "completed"  # completed | timed_out | failed | running
+    status: str = "completed"  # completed | timed_out | failed | running | queued
     job_id: str = ""
     partial: bool = False
+    workspace_id: str = ""
 
 
 class ActivityResponse(BaseModel):
@@ -346,15 +347,37 @@ def chat(req: ChatRequest):
 
     thread_id = req.thread_id or "lumora-api-session"
     long_task = req.async_mode or jobs_mod.is_long_running_request(req.message)
-    # Leave margin under Vercel maxDuration (300s configured).
-    time_budget_s = 260 if long_task else 50
-    recursion_limit = 40 if long_task else 12
+
+    # Long builds: queue job and return immediately (frontend drives /tick).
+    if long_task:
+        gen = projects_generate(req)
+        job_id = gen["job_id"]
+        return {
+            "response": (
+                "Starting project generation…\n\n"
+                f"**Job:** `{job_id}`\n"
+                f"**Workspace:** `{gen.get('workspace_id') or req.workspace_id or 'pending'}`\n\n"
+                "I'll build this in stages (plan → generate files → review). "
+                "Progress updates will appear here; Files and Preview refresh when each stage completes."
+            ),
+            "task_id": task_id,
+            "plan_id": plan_id,
+            "activity": get_activity(-20),
+            "status": "queued",
+            "job_id": job_id,
+            "partial": True,
+            "workspace_id": gen.get("workspace_id") or req.workspace_id or "",
+        }
+
+    # Short chat path (sync)
+    time_budget_s = 50
+    recursion_limit = 12
     config = {
         "configurable": {"thread_id": thread_id},
         "recursion_limit": recursion_limit,
     }
 
-    job = jobs_mod.create_job(req.message, thread_id=thread_id, task_id=task_id)
+    job = jobs_mod.create_job(req.message, thread_id=thread_id, task_id=task_id, workspace_id=req.workspace_id or "")
     job["status"] = "running"
     jobs_mod.save_job(job)
     job_id = job["id"]
@@ -540,12 +563,127 @@ def get_job(job_id: str):
     job = jobs_mod.load_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-    return job
+    # Strip heavy message payload for light polls unless ?full=1
+    return {
+        "id": job.get("id"),
+        "status": job.get("status"),
+        "stage": job.get("stage"),
+        "progress": job.get("progress", 0),
+        "message": job.get("response") or job.get("message") or "",
+        "response": job.get("response") or "",
+        "error": job.get("error") or "",
+        "reason": job.get("reason") or "",
+        "files_created": job.get("files_created") or [],
+        "workspace_id": job.get("workspace_id") or "",
+        "tick_count": job.get("tick_count") or 0,
+        "elapsed_ms": job.get("elapsed_ms") or 0,
+        "partial": bool(job.get("partial")),
+        "task_id": job.get("task_id") or "",
+        "created_at": job.get("created_at"),
+        "updated_at": job.get("updated_at"),
+    }
 
 
 @app.get("/jobs")
 def list_jobs(limit: int = 20):
     return {"jobs": jobs_mod.list_recent_jobs(limit)}
+
+
+@app.post("/projects/generate")
+def projects_generate(req: ChatRequest):
+    """
+    Queue a long-running project generation job and return immediately.
+    Frontend must drive work via POST /jobs/{id}/tick.
+    """
+    if not req.message.strip():
+        raise HTTPException(status_code=400, detail="message must not be empty")
+
+    workspace_id = req.workspace_id or ""
+    # Auto-create workspace when missing
+    if not workspace_id:
+        try:
+            from backend import files_router as fr
+            import re
+            m = re.search(r"(?:called|named|for)\s+([A-Za-z0-9][A-Za-z0-9 \-]{1,40})", req.message, re.I)
+            name = (m.group(1) if m else "Generated Project").strip()[:40]
+            created = fr.create_workspace(
+                fr.WorkspaceCreateRequest(
+                    name=name,
+                    description=req.message[:120],
+                    template="html",
+                    framework="html",
+                )
+            )
+            workspace_id = created.get("id") or name.lower().replace(" ", "-")
+        except Exception as exc:
+            logger.warning("Auto workspace create failed: %s", exc)
+
+    thread_id = req.thread_id or (f"ws-{workspace_id}" if workspace_id else "lumora-api-session")
+    job = jobs_mod.create_job(
+        req.message,
+        thread_id=thread_id,
+        workspace_id=workspace_id,
+    )
+    job["status"] = "queued"
+    job["stage"] = "queued"
+    job["progress"] = 0
+    jobs_mod.save_job(job)
+    add_activity("coordinator", f"Queued generation job {job['id']}", workspace_id, 5)
+    return {
+        "job_id": job["id"],
+        "status": "queued",
+        "stage": "queued",
+        "progress": 0,
+        "workspace_id": workspace_id,
+        "message": "Job queued. Poll GET /jobs/{id} and drive POST /jobs/{id}/tick.",
+    }
+
+
+@app.post("/jobs/{job_id}/tick")
+def jobs_tick(job_id: str):
+    """
+    Run one bounded LangGraph slice for the job. Designed for Vercel:
+    each invocation should finish well under maxDuration.
+    """
+    if _agent is None:
+        raise HTTPException(status_code=503, detail="Agent is not initialised yet")
+    job = jobs_mod.load_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.get("status") == "completed":
+        return get_job(job_id)
+
+    try:
+        updated = jobs_mod.run_job_tick(_agent, job, max_steps=4, time_budget_s=45.0)
+    except Exception as exc:
+        logger.exception("Job tick failed")
+        job["status"] = "paused"
+        job["reason"] = "tick_error"
+        job["error"] = str(exc)
+        jobs_mod.save_job(job)
+        raise HTTPException(status_code=502, detail=f"Tick failed: {exc}") from exc
+
+    add_activity(
+        "coordinator",
+        f"Job {job_id} tick={updated.get('tick_count')} stage={updated.get('stage')} {updated.get('progress')}%",
+        ",".join((updated.get("files_created") or [])[:5]),
+        int(updated.get("progress") or 0),
+    )
+    return get_job(job_id)
+
+
+@app.post("/jobs/{job_id}/continue")
+def jobs_continue(job_id: str):
+    """Resume a paused job (same as tick)."""
+    job = jobs_mod.load_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.get("status") == "paused":
+        job["status"] = "running"
+        job["reason"] = ""
+        job["error"] = ""
+        jobs_mod.save_job(job)
+    return jobs_tick(job_id)
 
 
 @app.get("/activity", response_model=ActivityResponse)

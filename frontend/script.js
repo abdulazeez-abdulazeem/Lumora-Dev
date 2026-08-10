@@ -328,6 +328,14 @@ async function sendMessage() {
       const titleEl = document.getElementById('activityTaskTitle');
       if (titleEl) titleEl.textContent = 'Task: ' + (text || '').substring(0, 60);
     }
+    // Async project generation: drive bounded ticks (no single long HTTP call)
+    if (data.job_id && (data.status === 'queued' || data.partial)) {
+      if (data.workspace_id && !currentWorkspace) {
+        persistWorkspace({ id: data.workspace_id, name: data.workspace_id });
+      }
+      try { localStorage.setItem('lumora_active_job', data.job_id); } catch (_) {}
+      await driveJobTicks(data.job_id);
+    }
   } catch (err) {
     removeTypingIndicator();
     console.error('[Lumora Dev API]', err);
@@ -2699,3 +2707,112 @@ document.querySelectorAll('#moreTabsSheet [data-tab]').forEach(btn => {
     document.getElementById('moreTabsSheet')?.classList.remove('open');
   });
 });
+
+
+/** Drive a queued generation job via bounded /tick calls until done or paused. */
+async function driveJobTicks(jobId) {
+  const stages = {
+    queued: 'Queued…',
+    planning: 'Planning your website…',
+    generating: 'Generating files…',
+    reviewing: 'Reviewing…',
+    finishing: 'Finishing…',
+    running: 'Working…',
+    paused: 'Paused — send "continue" or retry.',
+    completed: 'Completed.',
+    failed: 'Failed.',
+  };
+  const statusEl = document.createElement('div');
+  statusEl.className = 'job-progress-card';
+  statusEl.innerHTML = '<div class="job-progress-title">Project generation</div>' +
+    '<div class="job-progress-bar"><div class="job-progress-fill" style="width:2%"></div></div>' +
+    '<div class="job-progress-meta">Starting…</div>';
+  const chat = document.getElementById('chatMessages') || document.querySelector('.messages') || document.getElementById('chatArea');
+  if (chat) chat.appendChild(statusEl);
+
+  const maxTicks = 20;
+  let lastStage = '';
+  for (let i = 0; i < maxTicks; i++) {
+    let job;
+    try {
+      const res = await fetch(`${API_BASE}/jobs/${encodeURIComponent(jobId)}/tick`, {
+        method: 'POST',
+        headers: apiHeaders({ 'Content-Type': 'application/json' }),
+      });
+      if (!res.ok) {
+        const detail = await res.text().catch(() => res.statusText);
+        statusEl.querySelector('.job-progress-meta').textContent = `Tick error: ${res.status} ${detail.slice(0, 120)}`;
+        if (res.status === 503 || res.status === 429) {
+          appendMessage('ai', 'Generation paused (provider limit or agent unavailable). Files created so far are kept. Retry later with Continue.');
+          break;
+        }
+        // try continue once
+        await new Promise(r => setTimeout(r, 1500));
+        continue;
+      }
+      job = await res.json();
+    } catch (err) {
+      statusEl.querySelector('.job-progress-meta').textContent = 'Network error: ' + err.message;
+      await new Promise(r => setTimeout(r, 2000));
+      continue;
+    }
+
+    const progress = job.progress || 0;
+    const stage = job.stage || job.status || 'running';
+    const fill = statusEl.querySelector('.job-progress-fill');
+    if (fill) fill.style.width = Math.max(2, progress) + '%';
+    const meta = stages[stage] || stage;
+    const files = (job.files_created || []).slice(0, 8).join(', ');
+    statusEl.querySelector('.job-progress-meta').textContent =
+      `${meta} (${progress}%)` + (files ? ` · ${files}` : '');
+
+    if (stage !== lastStage) {
+      lastStage = stage;
+      const badge = document.querySelector('.nav-badge');
+      if (badge) badge.textContent = stage === 'completed' ? 'Ready' : ('Stage ' + Math.min(5, Math.ceil(progress / 20) || 1));
+    }
+
+    if (job.workspace_id) {
+      if (!currentWorkspace || currentWorkspace.id !== job.workspace_id) {
+        persistWorkspace({ id: job.workspace_id, name: job.workspace_id });
+      }
+    }
+    try { loadFileTree(); } catch (_) {}
+    try { maybeAutoPreview(); } catch (_) {}
+
+    if (job.status === 'completed') {
+      statusEl.querySelector('.job-progress-meta').textContent = 'Completed (100%)';
+      if (fill) fill.style.width = '100%';
+      appendMessage('ai', job.response || ('Project generation completed. Files: ' + (job.files_created || []).join(', ')));
+      try { localStorage.removeItem('lumora_active_job'); } catch (_) {}
+      return job;
+    }
+    if (job.status === 'paused' || job.status === 'failed') {
+      appendMessage('ai', 'Generation ' + job.status + (job.error ? (': ' + job.error) : '') +
+        '\\n\\nYou can continue later. Files so far: ' + (job.files_created || []).join(', '));
+      return job;
+    }
+    // brief pause between ticks
+    await new Promise(r => setTimeout(r, 400));
+  }
+  appendMessage('ai', 'Generation still running after max ticks. Open Files to see progress, or send "continue".');
+  return null;
+}
+
+// Resume active job after refresh
+(async function resumeActiveJob() {
+  try {
+    const id = localStorage.getItem('lumora_active_job');
+    if (!id) return;
+    const res = await fetch(`${API_BASE}/jobs/${encodeURIComponent(id)}`, { headers: apiHeaders() });
+    if (!res.ok) return;
+    const job = await res.json();
+    if (job.status === 'completed' || job.status === 'failed') {
+      localStorage.removeItem('lumora_active_job');
+      return;
+    }
+    if (job.status === 'queued' || job.status === 'running' || job.status === 'paused' || job.partial) {
+      await driveJobTicks(id);
+    }
+  } catch (_) {}
+})();

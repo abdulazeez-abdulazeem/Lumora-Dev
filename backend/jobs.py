@@ -1,9 +1,10 @@
 """
-Lumora Dev – Long-running job store (file-based).
+Lumora Dev – Long-running job store + tick runner (serverless-safe).
 
-Used on serverless (Vercel) where a single HTTP request cannot exceed maxDuration.
-Jobs persist under a writable directory so status/polling works across invocations
-on the same instance, and for local/Docker the same paths work under /tmp or project root.
+Vercel functions are ephemeral: work must resume via repeated bounded
+HTTP "ticks", not BackgroundTasks/threads after the response returns.
+
+Job state (messages, progress, files) is persisted under a writable dir.
 """
 from __future__ import annotations
 
@@ -30,18 +31,18 @@ def _jobs_dir() -> Path:
 
 JOBS_DIR = _jobs_dir()
 
-# Heuristics for routing to long-running path (still may run in-request with higher budget)
 _LONG_KEYWORDS = (
     "build me", "create a website", "create a landing", "landing page",
     "full stack", "generate a project", "scaffold", "build a website",
     "build an app", "create an app", "make a website", "develop a",
     "coffee shop", "ecommerce", "e-commerce", "dashboard app",
+    "complete modern", "hero section", "responsive mobile",
 )
 
 
 def is_long_running_request(message: str) -> bool:
     m = (message or "").lower()
-    if len(m) > 400:
+    if len(m) > 280:
         return True
     return any(k in m for k in _LONG_KEYWORDS)
 
@@ -55,30 +56,47 @@ def save_job(job: dict) -> None:
     job = dict(job)
     job["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ")
     p = _path(job["id"])
-    p.write_text(json.dumps(job, indent=2), encoding="utf-8")
+    try:
+        p.write_text(json.dumps(job, indent=2), encoding="utf-8")
+    except OSError:
+        alt = Path("/tmp/lumora-jobs") / p.name
+        alt.parent.mkdir(parents=True, exist_ok=True)
+        alt.write_text(json.dumps(job, indent=2), encoding="utf-8")
 
 
 def load_job(job_id: str) -> Optional[dict]:
-    p = _path(job_id)
-    if not p.exists():
-        return None
-    try:
-        return json.loads(p.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, ValueError):
-        return None
+    for base in (JOBS_DIR, Path("/tmp/lumora-jobs")):
+        p = base / f"{''.join(c for c in job_id if c.isalnum() or c in '-_')}.json"
+        if p.exists():
+            try:
+                return json.loads(p.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, ValueError):
+                return None
+    return None
 
 
-def create_job(message: str, thread_id: str = "", task_id: str = "") -> dict:
+def create_job(
+    message: str,
+    thread_id: str = "",
+    task_id: str = "",
+    workspace_id: str = "",
+) -> dict:
     jid = f"job-{uuid.uuid4().hex[:12]}"
     job = {
         "id": jid,
         "task_id": task_id or jid,
         "thread_id": thread_id or jid,
+        "workspace_id": workspace_id or "",
         "message": message,
-        "status": "queued",  # queued | running | completed | failed | timed_out
+        "status": "queued",  # queued|planning|generating|reviewing|running|paused|completed|failed
+        "stage": "queued",
         "response": "",
         "error": "",
+        "reason": "",
         "progress": 0,
+        "tick_count": 0,
+        "files_created": [],
+        "messages": [],  # serialized LangChain-ish messages for resume
         "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "elapsed_ms": 0,
@@ -90,9 +108,286 @@ def create_job(message: str, thread_id: str = "", task_id: str = "") -> dict:
 
 def list_recent_jobs(limit: int = 20) -> list[dict]:
     jobs = []
-    for p in sorted(JOBS_DIR.glob("job-*.json"), key=lambda x: x.stat().st_mtime, reverse=True)[:limit]:
+    seen = set()
+    for base in (JOBS_DIR, Path("/tmp/lumora-jobs")):
+        if not base.exists():
+            continue
+        for p in sorted(base.glob("job-*.json"), key=lambda x: x.stat().st_mtime, reverse=True):
+            if p.name in seen:
+                continue
+            seen.add(p.name)
+            try:
+                jobs.append(json.loads(p.read_text(encoding="utf-8")))
+            except Exception:
+                pass
+            if len(jobs) >= limit:
+                return jobs
+    return jobs
+
+
+# ── Message serialization (cross-invocation resume without MemorySaver) ──
+
+def serialize_messages(messages: list) -> list[dict]:
+    out = []
+    for msg in messages or []:
+        t = getattr(msg, "type", None) or getattr(msg, "role", None) or type(msg).__name__
+        t = str(t).lower()
+        if t in ("human", "humanmessage"):
+            role = "human"
+        elif t in ("ai", "aimessage"):
+            role = "ai"
+        elif t in ("tool", "toolmessage"):
+            role = "tool"
+        elif t in ("system", "systemmessage"):
+            role = "system"
+        else:
+            role = t
+        item: dict[str, Any] = {
+            "role": role,
+            "content": getattr(msg, "content", "") or "",
+        }
+        tool_calls = getattr(msg, "tool_calls", None)
+        if tool_calls:
+            # ensure JSON-serializable
+            try:
+                item["tool_calls"] = json.loads(json.dumps(tool_calls, default=str))
+            except Exception:
+                item["tool_calls"] = []
+        if role == "tool":
+            item["name"] = getattr(msg, "name", "") or ""
+            item["tool_call_id"] = getattr(msg, "tool_call_id", "") or ""
+        out.append(item)
+    return out
+
+
+def deserialize_messages(raw: list[dict]):
+    from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+
+    msgs = []
+    for item in raw or []:
+        role = (item.get("role") or "human").lower()
+        content = item.get("content") or ""
+        if role == "human":
+            msgs.append(HumanMessage(content=content))
+        elif role == "ai":
+            kwargs = {"content": content}
+            if item.get("tool_calls"):
+                kwargs["tool_calls"] = item["tool_calls"]
+            msgs.append(AIMessage(**kwargs))
+        elif role == "tool":
+            msgs.append(
+                ToolMessage(
+                    content=content,
+                    name=item.get("name") or "tool",
+                    tool_call_id=item.get("tool_call_id") or "call_0",
+                )
+            )
+        elif role == "system":
+            msgs.append(SystemMessage(content=content))
+        else:
+            msgs.append(HumanMessage(content=content))
+    return msgs
+
+
+def _list_workspace_files(workspace_id: str) -> list[str]:
+    if not workspace_id:
+        return []
+    try:
+        from backend.files_router import USER_WORKSPACES_ROOT
+
+        root = USER_WORKSPACES_ROOT / workspace_id
+        if not root.exists():
+            return []
+        files = []
+        for p in sorted(root.rglob("*")):
+            if p.is_file() and not any(part.startswith(".") for part in p.parts):
+                try:
+                    files.append(str(p.relative_to(root)))
+                except ValueError:
+                    files.append(p.name)
+        return files
+    except Exception:
+        return []
+
+
+def _stage_for(progress: int, status: str) -> str:
+    if status in ("completed", "failed", "paused", "queued"):
+        return status if status != "queued" else "queued"
+    if progress < 15:
+        return "planning"
+    if progress < 75:
+        return "generating"
+    if progress < 95:
+        return "reviewing"
+    return "finishing"
+
+
+def run_job_tick(agent, job: dict, *, max_steps: int = 4, time_budget_s: float = 45.0) -> dict:
+    """
+    Execute a bounded slice of the LangGraph agent for this job.
+    Persists message checkpoint + progress. Safe for Vercel maxDuration slices.
+    """
+    from langchain_core.messages import HumanMessage
+
+    job = dict(job)
+    job_id = job["id"]
+    t0 = time.time()
+
+    # Bind workspace so tools write into user project
+    ws_id = job.get("workspace_id") or ""
+    if ws_id:
         try:
-            jobs.append(json.loads(p.read_text(encoding="utf-8")))
+            from backend.files_router import set_active_workspace, USER_WORKSPACES_ROOT, effective_root
+            import agent as agent_mod
+
+            set_active_workspace(ws_id)
+            os.environ["LUMORA_PROJECT_ROOT"] = str(USER_WORKSPACES_ROOT / ws_id)
+            agent_mod.PROJECT_ROOT = effective_root()
         except Exception:
             pass
-    return jobs
+
+    files_before = set(_list_workspace_files(ws_id))
+
+    # Reconstruct messages
+    raw_msgs = job.get("messages") or []
+    if not raw_msgs:
+        user_content = job.get("message") or ""
+        user_content += (
+            "\n\n### Runtime constraints (serverless ticks)\n"
+            "You are generating files into the active project workspace. "
+            "Prefer write_file / create_directory. Keep files focused "
+            "(index.html, styles.css, script.js, assets). "
+            "After core pages exist, stop and summarize what you created."
+        )
+        messages = [HumanMessage(content=user_content)]
+    else:
+        messages = deserialize_messages(raw_msgs)
+
+    config = {
+        "configurable": {"thread_id": job.get("thread_id") or job_id},
+        "recursion_limit": max(2, max_steps * 2),
+    }
+
+    job["status"] = "running"
+    job["stage"] = _stage_for(job.get("progress", 0), "running")
+    job["tick_count"] = int(job.get("tick_count") or 0) + 1
+    save_job(job)
+
+    result_messages = messages
+    timed_out = False
+    hit_limit = False
+    error = ""
+
+    try:
+        deadline = t0 + time_budget_s
+        step = 0
+        if hasattr(agent, "stream"):
+            for event in agent.stream(
+                {"messages": messages},
+                config=config,
+                stream_mode="values",
+            ):
+                if isinstance(event, dict) and event.get("messages"):
+                    result_messages = event["messages"]
+                    step += 1
+                if step >= max_steps * 2:
+                    hit_limit = True
+                    break
+                if time.time() >= deadline:
+                    timed_out = True
+                    break
+        else:
+            out = agent.invoke({"messages": messages}, config=config)
+            result_messages = out.get("messages") or messages
+    except Exception as exc:
+        name = type(exc).__name__
+        detail = str(exc)
+        if name == "GraphRecursionError" or "Recursion limit" in detail:
+            hit_limit = True
+            try:
+                st = agent.get_state(config)
+                if st and getattr(st, "values", None):
+                    result_messages = st.values.get("messages") or result_messages
+            except Exception:
+                pass
+        elif "429" in detail or "Rate limit" in detail:
+            job["status"] = "paused"
+            job["stage"] = "paused"
+            job["reason"] = "provider_error"
+            job["error"] = detail
+            job["messages"] = serialize_messages(result_messages)
+            job["elapsed_ms"] = int(job.get("elapsed_ms") or 0) + int((time.time() - t0) * 1000)
+            save_job(job)
+            return job
+        else:
+            job["status"] = "paused"
+            job["stage"] = "paused"
+            job["reason"] = "agent_error"
+            job["error"] = detail
+            job["messages"] = serialize_messages(result_messages)
+            job["elapsed_ms"] = int(job.get("elapsed_ms") or 0) + int((time.time() - t0) * 1000)
+            save_job(job)
+            return job
+
+    # Persist checkpoint
+    job["messages"] = serialize_messages(result_messages)
+    files_after = set(_list_workspace_files(ws_id))
+    new_files = sorted(files_after - files_before)
+    all_files = sorted(files_after)
+    job["files_created"] = all_files
+
+    # Extract last AI text
+    response_text = ""
+    for msg in reversed(list(result_messages)):
+        if getattr(msg, "type", None) == "ai" and getattr(msg, "content", None):
+            response_text = msg.content
+            break
+    if response_text:
+        job["response"] = response_text
+
+    # Progress heuristic
+    progress = int(job.get("progress") or 0)
+    progress = min(95, progress + 8 + min(20, len(new_files) * 10))
+    if all_files and any(f.endswith(".html") for f in all_files):
+        progress = max(progress, 40)
+    if all_files and any(f.endswith(".css") for f in all_files):
+        progress = max(progress, 55)
+    if all_files and any(f.endswith(".js") for f in all_files):
+        progress = max(progress, 70)
+
+    # Completion: agent produced final AI without pending tool_calls + has files
+    last_ai = None
+    for msg in reversed(list(result_messages)):
+        if getattr(msg, "type", None) == "ai":
+            last_ai = msg
+            break
+    pending_tools = bool(getattr(last_ai, "tool_calls", None)) if last_ai else False
+    done_phrases = ("complete", "completed", "finished", "done", "ready to preview")
+    text_done = any(p in (response_text or "").lower() for p in done_phrases)
+    has_site = any(f.endswith(".html") for f in all_files)
+
+    completed = False
+    if has_site and text_done and not pending_tools:
+        completed = True
+    if has_site and not pending_tools and progress >= 85 and not timed_out and not hit_limit:
+        # Enough structure and agent stopped tool use
+        completed = True
+    if job.get("tick_count", 0) >= 24 and has_site and not pending_tools:
+        completed = True
+
+    if completed:
+        job["status"] = "completed"
+        job["stage"] = "completed"
+        job["progress"] = 100
+        job["partial"] = False
+    else:
+        job["status"] = "running"
+        job["progress"] = progress
+        job["stage"] = _stage_for(progress, "running")
+        job["partial"] = True
+        if timed_out or hit_limit:
+            job["reason"] = "tick_budget"
+
+    job["elapsed_ms"] = int(job.get("elapsed_ms") or 0) + int((time.time() - t0) * 1000)
+    save_job(job)
+    return job

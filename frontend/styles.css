@@ -2337,3 +2337,38 @@ html.theme-light .topnav { background: rgba(255,255,255,0.85); }
 .settings-panel .pv-select {
   max-width: 160px;
 }
+
+/* Async job progress card in chat */
+.job-progress-card {
+  margin: 12px 16px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(139, 92, 246, 0.35);
+  background: rgba(139, 92, 246, 0.08);
+  max-width: 520px;
+}
+.job-progress-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--accent-light, #a78bfa);
+  margin-bottom: 8px;
+}
+.job-progress-bar {
+  height: 6px;
+  border-radius: 99px;
+  background: rgba(255,255,255,0.08);
+  overflow: hidden;
+}
+.job-progress-fill {
+  height: 100%;
+  width: 2%;
+  background: linear-gradient(90deg, #7c3aed, #a78bfa);
+  border-radius: 99px;
+  transition: width 0.35s ease;
+}
+.job-progress-meta {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-2, #a1a1aa);
+  line-height: 1.4;
+}
