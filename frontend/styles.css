@@ -2406,3 +2406,248 @@ html.theme-light .topnav { background: rgba(255,255,255,0.85); }
 }
 .job-reason { color: var(--text-2); }
 .job-files { color: var(--text-3); font-size: 11px; }
+
+/* ═══ Settings modal — proper layout ═══ */
+.settings-modal {
+  width: min(640px, calc(100vw - 24px));
+  max-height: min(88vh, 720px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.settings-header {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: stretch !important;
+  border-bottom: 1px solid var(--glass-border);
+  padding-bottom: 12px;
+}
+.settings-header-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.settings-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-1);
+}
+.settings-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  width: 100%;
+}
+.settings-nav-btn {
+  flex: 1 1 auto;
+  min-height: 36px;
+  min-width: 0;
+  padding: 8px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+  font-family: inherit;
+  white-space: nowrap;
+}
+.settings-nav-btn:hover { background: var(--glass-bg-2); color: var(--text-1); }
+.settings-nav-btn.active {
+  background: var(--accent-soft);
+  color: var(--accent-light);
+  border-color: rgba(139, 92, 246, 0.28);
+}
+.settings-body {
+  overflow-y: auto;
+  overflow-x: hidden;
+  max-height: min(60vh, 520px);
+  padding: 4px 2px 12px;
+  -webkit-overflow-scrolling: touch;
+}
+.settings-section-title {
+  margin: 4px 0 14px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.setting-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 4px;
+  border-bottom: 1px solid var(--glass-border);
+}
+.setting-row-stack {
+  flex-direction: column;
+  align-items: stretch;
+}
+.setting-meta { min-width: 0; flex: 1; }
+.setting-meta label { display: block; font-size: 13px; font-weight: 600; color: var(--text-1); }
+.setting-hint {
+  margin: 4px 0 0;
+  font-size: 11px;
+  color: var(--text-3);
+  line-height: 1.4;
+}
+.setting-value {
+  font-size: 13px;
+  color: var(--text-2);
+  text-align: right;
+  max-width: 55%;
+  word-break: break-word;
+}
+.setting-value.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+
+.theme-options {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-top: 8px;
+}
+.theme-option { cursor: pointer; }
+.theme-option input { position: absolute; opacity: 0; pointer-events: none; }
+.theme-option-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 8px;
+  border-radius: 12px;
+  border: 1px solid var(--glass-border);
+  background: var(--glass-bg);
+  min-height: 88px;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.theme-option input:checked + .theme-option-card {
+  border-color: rgba(139, 92, 246, 0.55);
+  box-shadow: 0 0 0 2px rgba(139, 92, 246, 0.2);
+}
+.theme-option input:focus-visible + .theme-option-card {
+  outline: 2px solid var(--accent-light, #a78bfa);
+  outline-offset: 2px;
+}
+.theme-swatch {
+  width: 100%;
+  height: 36px;
+  border-radius: 8px;
+  border: 1px solid var(--glass-border);
+}
+.theme-swatch-dark { background: linear-gradient(135deg, #0a0a0c, #1e1b4b); }
+.theme-swatch-light { background: linear-gradient(135deg, #f4f4f5, #e4e4e7); }
+.theme-swatch-system { background: linear-gradient(90deg, #0a0a0c 50%, #f4f4f5 50%); }
+.theme-option-text { font-size: 12px; font-weight: 600; color: var(--text-1); }
+
+.provider-summary-card {
+  border: 1px solid var(--glass-border);
+  border-radius: 12px;
+  padding: 12px 14px;
+  background: var(--glass-bg);
+  margin-bottom: 10px;
+}
+.provider-summary-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--glass-border);
+  font-size: 13px;
+}
+.provider-summary-row:last-child { border-bottom: none; }
+.provider-summary-label { color: var(--text-3); font-weight: 500; }
+.provider-summary-value { color: var(--text-1); font-weight: 600; text-align: right; }
+.status-dot { color: #34d399; margin-right: 4px; }
+.status-dot.warn { color: #fbbf24; }
+.status-dot.err { color: #f87171; }
+.provider-key-note { margin: 0 0 14px; }
+
+.about-hero {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 12px;
+}
+.about-logo {
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+  display: grid;
+  place-items: center;
+  font-weight: 800;
+  font-size: 20px;
+  color: #fff;
+  background: linear-gradient(135deg, #7c3aed, #a78bfa);
+}
+.about-name { font-size: 18px; font-weight: 700; color: var(--text-1); }
+.about-version { font-size: 12px; color: var(--text-3); }
+.about-desc {
+  font-size: 13px;
+  color: var(--text-2);
+  line-height: 1.5;
+  margin: 0 0 16px;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0,0,0,0);
+  border: 0;
+}
+
+/* Light theme: hide DarkVeil canvas without removing it */
+html.theme-light .darkveil-canvas,
+html.darkveil-off .darkveil-canvas,
+html.theme-light #darkveil,
+html.darkveil-off #darkveil {
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+html.theme-light body {
+  background: #f4f4f5 !important;
+}
+
+@media (max-width: 480px) {
+  .settings-modal {
+    width: calc(100vw - 16px);
+    max-height: 92vh;
+    margin: 0 auto;
+  }
+  .settings-nav-btn {
+    flex: 1 1 calc(50% - 6px);
+    font-size: 11px;
+    padding: 8px 6px;
+  }
+  .setting-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .setting-value {
+    text-align: left;
+    max-width: 100%;
+  }
+  .theme-options {
+    grid-template-columns: 1fr;
+  }
+  .theme-option-card {
+    flex-direction: row;
+    min-height: 48px;
+    justify-content: flex-start;
+    padding: 10px 12px;
+  }
+  .theme-swatch {
+    width: 48px;
+    height: 28px;
+    flex-shrink: 0;
+  }
+}

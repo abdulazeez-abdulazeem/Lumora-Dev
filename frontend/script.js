@@ -87,8 +87,17 @@ sidebarClose.addEventListener('click', closeSidebar);
 sidebarOverlay.addEventListener('click', closeSidebar);
 
 // ── Settings Modal ────────────────────────────────────────────────────
-function openSettings() { settingsModal.classList.add('open'); }
-function closeSettings() { settingsModal.classList.remove('open'); }
+function openSettings() {
+  settingsModal.classList.add('open');
+  document.body.style.overflow = 'hidden';
+  try { refreshSettingsPanels(); } catch (_) {}
+  // focus close for a11y
+  document.getElementById('modalClose')?.focus();
+}
+function closeSettings() {
+  settingsModal.classList.remove('open');
+  document.body.style.overflow = '';
+}
 
 settingsBtn.addEventListener('click', openSettings);
 navSettingsBtn.addEventListener('click', openSettings);
@@ -106,7 +115,15 @@ document.querySelectorAll('.settings-nav-btn').forEach(btn => {
     const panelId = 'panel' + btn.dataset.panel.charAt(0).toUpperCase() + btn.dataset.panel.slice(1);
     document.getElementById(panelId)?.classList.add('active');
     if (btn.dataset.panel === 'providers') loadProviderSettings();
+    if (btn.dataset.panel === 'general' || btn.dataset.panel === 'about') {
+      try { refreshSettingsPanels(); } catch (_) {}
+    }
   });
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && settingsModal?.classList.contains('open')) {
+    closeSettings();
+  }
 });
 
 // ── Tab switching: also handle SCM lazy load ────────────────────────
@@ -2685,6 +2702,16 @@ async function maybeAutoPreview() {
   } catch (_) {}
 }
 
+function getSavedThemeMode() {
+  try {
+    return localStorage.getItem('lumora-theme')
+      || localStorage.getItem('lumora_theme')
+      || 'dark';
+  } catch (_) {
+    return 'dark';
+  }
+}
+
 function applyTheme(mode) {
   const root = document.documentElement;
   let resolved = mode;
@@ -2693,20 +2720,101 @@ function applyTheme(mode) {
   }
   root.setAttribute('data-theme', resolved);
   root.classList.toggle('theme-light', resolved === 'light');
-  try { localStorage.setItem('lumora_theme', mode); } catch (_) {}
+  // Pause DarkVeil visually in light mode without removing the script/canvas
+  root.classList.toggle('darkveil-off', resolved === 'light');
+  try {
+    localStorage.setItem('lumora-theme', mode);
+    localStorage.setItem('lumora_theme', mode); // compat
+  } catch (_) {}
   const sel = document.getElementById('settingTheme');
   if (sel) sel.value = mode;
+  document.querySelectorAll('input[name="lumoraTheme"]').forEach((r) => {
+    r.checked = r.value === mode;
+  });
+  const dv = document.getElementById('genDarkVeil');
+  if (dv) dv.textContent = resolved === 'light' ? 'Paused (light theme)' : 'Enabled';
 }
+
+async function refreshSettingsPanels() {
+  // Project
+  const proj = document.getElementById('genProject');
+  const ws = document.getElementById('genWorkspace');
+  if (proj) proj.textContent = (currentWorkspace && currentWorkspace.name) ? currentWorkspace.name : 'None selected';
+  if (ws) ws.textContent = (currentWorkspace && currentWorkspace.id)
+    ? ('Project workspace · ' + currentWorkspace.id)
+    : 'No project selected — source code is not exposed';
+
+  // Health / runtime (no secrets, no /var/task paths)
+  try {
+    const res = await fetch(`${API_BASE}/health`, { headers: apiHeaders() });
+    if (res.ok) {
+      const h = await res.json();
+      const runtime = h.runtime || (location.hostname.includes('vercel') ? 'Vercel' : 'Local / container');
+      const ver = h.version || '4.0.0';
+      const agentOk = h.agent_ready ? 'Ready' : (h.backend_api_loaded ? 'Backend loaded' : 'Limited');
+      const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+      set('genRuntime', runtime);
+      set('genVersion', ver);
+      set('genAgentStatus', agentOk);
+      set('aboutVersion', 'v' + ver);
+      set('aboutRuntime', runtime);
+    }
+  } catch (_) {
+    const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+    set('genRuntime', location.hostname.includes('vercel') ? 'Vercel' : 'Unknown');
+  }
+
+  // Providers summary (never expose raw API keys)
+  try {
+    const res = await fetch(`${API_BASE}/settings`, { headers: apiHeaders() });
+    if (res.ok) {
+      const data = await res.json();
+      const pid = data.default_provider || 'openrouter';
+      const prov = (data.providers && data.providers[pid]) || {};
+      const name = prov.name || pid;
+      const model = data.default_model || prov.default_model || '—';
+      const connected = !!prov.connected || !!prov.has_key || !!data.has_api_key;
+      const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+      set('genProvider', name);
+      set('genModel', model);
+      set('provName', name);
+      set('provModel', model);
+      const st = document.getElementById('provStatus');
+      if (st) {
+        st.innerHTML = connected
+          ? '<span class="status-dot">●</span> Configured'
+          : '<span class="status-dot warn">●</span> Env key expected';
+      }
+      const pk = document.getElementById('provKey');
+      if (pk) pk.textContent = connected ? '••••••••••••  (configured)' : 'Not set in this client';
+    }
+  } catch (_) {
+    const st = document.getElementById('provStatus');
+    if (st) st.innerHTML = '<span class="status-dot warn">●</span> Using environment configuration';
+    const pk = document.getElementById('provKey');
+    if (pk) pk.textContent = '••••••••••••';
+  }
+}
+
 (function initTheme() {
-  let mode = 'dark';
-  try { mode = localStorage.getItem('lumora_theme') || 'dark'; } catch (_) {}
+  const mode = getSavedThemeMode();
   applyTheme(mode);
   document.getElementById('settingTheme')?.addEventListener('change', e => applyTheme(e.target.value));
+  document.querySelectorAll('input[name="lumoraTheme"]').forEach((r) => {
+    r.addEventListener('change', () => {
+      if (r.checked) applyTheme(r.value);
+    });
+  });
   document.getElementById('themeToggleBtn')?.addEventListener('click', () => {
-    const cur = localStorage.getItem('lumora_theme') || 'dark';
+    const cur = getSavedThemeMode();
     const next = cur === 'dark' ? 'light' : cur === 'light' ? 'system' : 'dark';
     applyTheme(next);
   });
+  try {
+    window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => {
+      if (getSavedThemeMode() === 'system') applyTheme('system');
+    });
+  } catch (_) {}
 })();
 
 // Mobile "More" menu
