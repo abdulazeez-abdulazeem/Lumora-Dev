@@ -2372,3 +2372,37 @@ html.theme-light .topnav { background: rgba(255,255,255,0.85); }
   color: var(--text-2, #a1a1aa);
   line-height: 1.4;
 }
+
+.job-progress-card.is-paused {
+  border-color: rgba(251, 191, 36, 0.45);
+  background: rgba(251, 191, 36, 0.08);
+}
+.job-progress-card.is-completed {
+  border-color: rgba(52, 211, 153, 0.4);
+  background: rgba(52, 211, 153, 0.08);
+}
+.job-progress-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+.job-progress-actions .pv-btn {
+  min-height: 40px;
+  padding: 8px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--glass-border);
+  background: var(--glass-bg);
+  color: var(--text-1);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+}
+.job-progress-actions .pv-btn.primary {
+  background: rgba(139, 92, 246, 0.9);
+  border-color: transparent;
+  color: #fff;
+}
+.job-reason { color: var(--text-2); }
+.job-files { color: var(--text-3); font-size: 11px; }

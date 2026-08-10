@@ -47,6 +47,68 @@ def is_long_running_request(message: str) -> bool:
     return any(k in m for k in _LONG_KEYWORDS)
 
 
+def classify_provider_error(exc) -> dict:
+    """Map provider/agent exceptions to safe, user-facing recovery info (no secrets)."""
+    detail = str(exc) if not isinstance(exc, str) else exc
+    low = detail.lower()
+    category = "agent_error"
+    http_status = None
+    retryable = True
+    if "429" in detail or "rate limit" in low:
+        category = "rate_limit"
+        http_status = 429
+    elif "504" in detail or "timeout" in low or "timed out" in low:
+        category = "timeout"
+        http_status = 504
+    elif "502" in detail or "503" in detail or "service unavailable" in low or "bad gateway" in low:
+        category = "provider_unavailable"
+        http_status = 503 if "503" in detail else 502
+    elif "401" in detail or "403" in detail or "auth" in low and "api" in low:
+        category = "auth"
+        http_status = 401
+        retryable = False
+    elif "400" in detail or "provider returned error" in low or "invalid" in low:
+        category = "model_rejected"
+        http_status = 400
+        retryable = True  # often transient model glitch; allow Continue
+    elif "recursion" in low:
+        category = "step_limit"
+        retryable = True
+
+    messages = {
+        "rate_limit": "AI provider rate limit reached. Your project files are safe. Try Continue shortly.",
+        "timeout": "The generation step timed out. Your existing files are safe.",
+        "provider_unavailable": "The AI provider is temporarily unavailable. Your existing files are safe.",
+        "auth": "AI provider authentication failed. Check your API key in Settings. Existing files are safe.",
+        "model_rejected": "The selected AI model rejected this request. Your existing files are safe.",
+        "step_limit": "This build step hit the step budget. Your files are safe — Continue to resume.",
+        "agent_error": "A generation step failed. Your existing files are safe. You can Continue or edit files manually.",
+    }
+    return {
+        "category": category,
+        "http_status": http_status,
+        "retryable": retryable,
+        "user_message": messages.get(category, messages["agent_error"]),
+        # Truncated technical detail for logs/UI secondary line (no keys)
+        "detail": detail[:280].replace("\n", " "),
+    }
+
+
+def apply_pause(job: dict, exc, *, result_messages=None) -> dict:
+    info = classify_provider_error(exc)
+    job["status"] = "paused"
+    job["stage"] = "paused"
+    job["reason"] = info["category"]
+    job["error"] = info["detail"]
+    job["user_message"] = info["user_message"]
+    job["retryable"] = info["retryable"]
+    job["error_category"] = info["category"]
+    if result_messages is not None:
+        job["messages"] = serialize_messages(result_messages)
+    job["locked_until"] = 0
+    return job
+
+
 def _path(job_id: str) -> Path:
     safe = "".join(c for c in job_id if c.isalnum() or c in "-_")
     return JOBS_DIR / f"{safe}.json"
@@ -101,6 +163,11 @@ def create_job(
         "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "elapsed_ms": 0,
         "partial": False,
+        "user_message": "",
+        "retryable": True,
+        "error_category": "",
+        "provider_retries": 0,
+        "locked_until": 0,
     }
     save_job(job)
     return job
@@ -310,24 +377,31 @@ def run_job_tick(agent, job: dict, *, max_steps: int = 4, time_budget_s: float =
                     result_messages = st.values.get("messages") or result_messages
             except Exception:
                 pass
-        elif "429" in detail or "Rate limit" in detail:
-            job["status"] = "paused"
-            job["stage"] = "paused"
-            job["reason"] = "provider_error"
-            job["error"] = detail
-            job["messages"] = serialize_messages(result_messages)
-            job["elapsed_ms"] = int(job.get("elapsed_ms") or 0) + int((time.time() - t0) * 1000)
-            save_job(job)
-            return job
         else:
-            job["status"] = "paused"
-            job["stage"] = "paused"
-            job["reason"] = "agent_error"
-            job["error"] = detail
-            job["messages"] = serialize_messages(result_messages)
-            job["elapsed_ms"] = int(job.get("elapsed_ms") or 0) + int((time.time() - t0) * 1000)
-            save_job(job)
-            return job
+            # Transient provider errors: small bounded retry inside this tick
+            info = classify_provider_error(exc)
+            attempts = int(job.get("provider_retries") or 0)
+            if info["retryable"] and info["category"] in (
+                "rate_limit", "provider_unavailable", "timeout"
+            ) and attempts < 2:
+                job["provider_retries"] = attempts + 1
+                time.sleep(min(2.5 * (attempts + 1), 6.0))
+                try:
+                    out = agent.invoke({"messages": messages}, config=config)
+                    result_messages = out.get("messages") or result_messages
+                    # fall through to normal persist
+                except Exception as exc2:
+                    job = apply_pause(job, exc2, result_messages=result_messages)
+                    job["files_created"] = sorted(_list_workspace_files(ws_id))
+                    job["elapsed_ms"] = int(job.get("elapsed_ms") or 0) + int((time.time() - t0) * 1000)
+                    save_job(job)
+                    return job
+            else:
+                job = apply_pause(job, exc, result_messages=result_messages)
+                job["files_created"] = sorted(_list_workspace_files(ws_id))
+                job["elapsed_ms"] = int(job.get("elapsed_ms") or 0) + int((time.time() - t0) * 1000)
+                save_job(job)
+                return job
 
     # Persist checkpoint
     job["messages"] = serialize_messages(result_messages)

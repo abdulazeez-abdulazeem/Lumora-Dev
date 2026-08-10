@@ -282,6 +282,19 @@ async function sendMessage() {
   await delay(300);
   showTypingIndicator();
   try {
+    // Resume paused build without starting a new project
+    if (/^(continue|continue build|resume|retry)\b/i.test(text.trim())) {
+      let jobId = null;
+      try { jobId = localStorage.getItem('lumora_active_job'); } catch (_) {}
+      if (jobId) {
+        removeTypingIndicator();
+        appendMessage('ai', 'Resuming the paused build…');
+        await driveJobTicks(jobId, { resume: true });
+        isTyping = false;
+        sendBtn.disabled = messageInput.value.trim() === '';
+        return;
+      }
+    }
     const longTask = /build me|landing page|website|scaffold|full stack|create an app|make a website/i.test(text);
     // Auto-create a project when user asks to build something and none is selected
     if (longTask && !currentWorkspace) {
@@ -2710,93 +2723,172 @@ document.querySelectorAll('#moreTabsSheet [data-tab]').forEach(btn => {
 
 
 /** Drive a queued generation job via bounded /tick calls until done or paused. */
-async function driveJobTicks(jobId) {
+async function driveJobTicks(jobId, options = {}) {
+  if (window.__lumoraJobDriving === jobId) return null;
+  window.__lumoraJobDriving = jobId;
+
   const stages = {
     queued: 'Queued…',
     planning: 'Planning your website…',
     generating: 'Generating files…',
-    reviewing: 'Reviewing…',
+    reviewing: 'Reviewing the generated project…',
     finishing: 'Finishing…',
     running: 'Working…',
-    paused: 'Paused — send "continue" or retry.',
-    completed: 'Completed.',
-    failed: 'Failed.',
+    paused: 'Build paused',
+    completed: 'Completed',
+    failed: 'Failed',
   };
-  const statusEl = document.createElement('div');
-  statusEl.className = 'job-progress-card';
-  statusEl.innerHTML = '<div class="job-progress-title">Project generation</div>' +
-    '<div class="job-progress-bar"><div class="job-progress-fill" style="width:2%"></div></div>' +
-    '<div class="job-progress-meta">Starting…</div>';
-  const chat = document.getElementById('chatMessages') || document.querySelector('.messages') || document.getElementById('chatArea');
-  if (chat) chat.appendChild(statusEl);
 
-  const maxTicks = 20;
+  let statusEl = document.getElementById('jobProgress-' + jobId);
+  if (!statusEl) {
+    statusEl = document.createElement('div');
+    statusEl.className = 'job-progress-card';
+    statusEl.id = 'jobProgress-' + jobId;
+    statusEl.innerHTML =
+      '<div class="job-progress-title">Project generation</div>' +
+      '<div class="job-progress-bar"><div class="job-progress-fill" style="width:2%"></div></div>' +
+      '<div class="job-progress-meta">Starting…</div>' +
+      '<div class="job-progress-actions" hidden></div>';
+    const chat = document.getElementById('chatMessages') || document.querySelector('.messages') || document.getElementById('chatArea');
+    if (chat) chat.appendChild(statusEl);
+  }
+
+  const fill = () => statusEl.querySelector('.job-progress-fill');
+  const meta = () => statusEl.querySelector('.job-progress-meta');
+  const actions = () => statusEl.querySelector('.job-progress-actions');
+
+  function renderPaused(job) {
+    statusEl.classList.add('is-paused');
+    statusEl.classList.remove('is-completed');
+    const um = job.user_message || 'Build paused — your existing files are safe.';
+    const files = (job.files_created || []).join(', ') || 'none yet';
+    meta().innerHTML =
+      '<strong>BUILD PAUSED</strong><br/>' +
+      'Your existing project files are safe.<br/>' +
+      '<span class="job-reason">' + escapeHTML(um) + '</span><br/>' +
+      '<span class="job-files">Files: ' + escapeHTML(files) + '</span>';
+    actions().hidden = false;
+    actions().innerHTML =
+      '<button type="button" class="pv-btn primary" data-act="continue">Continue Build</button>' +
+      '<button type="button" class="pv-btn" data-act="files">View Files</button>';
+    actions().querySelector('[data-act="continue"]')?.addEventListener('click', async () => {
+      if (window.__lumoraJobDriving) return;
+      actions().hidden = true;
+      statusEl.classList.remove('is-paused');
+      meta().textContent = 'Resuming…';
+      try {
+        await fetch(`${API_BASE}/jobs/${encodeURIComponent(jobId)}/continue`, {
+          method: 'POST',
+          headers: apiHeaders({ 'Content-Type': 'application/json' }),
+        });
+      } catch (_) {}
+      await driveJobTicks(jobId, { resume: true });
+    });
+    actions().querySelector('[data-act="files"]')?.addEventListener('click', () => {
+      document.querySelector('.sidebar-tab[data-tab="files"]')?.click();
+      try { loadFileTree(); } catch (_) {}
+    });
+    appendMessage('ai', '**Build paused — your files are safe.**\n\n' + um +
+      '\n\nFiles so far: ' + files + '\n\nUse **Continue Build** when ready.');
+  }
+
+  function renderCompleted(job) {
+    statusEl.classList.add('is-completed');
+    statusEl.classList.remove('is-paused');
+    if (fill()) fill().style.width = '100%';
+    meta().textContent = 'Completed (100%)';
+    actions().hidden = true;
+    const files = (job.files_created || []).join(', ');
+    appendMessage('ai', (job.response || 'Your project is ready.') +
+      (files ? ('\n\nFiles: ' + files) : '') +
+      '\n\nOpen **Files** or **Preview** to review.');
+    try { localStorage.removeItem('lumora_active_job'); } catch (_) {}
+  }
+
+  const maxTicks = options.maxTicks || 20;
   let lastStage = '';
-  for (let i = 0; i < maxTicks; i++) {
-    let job;
-    try {
-      const res = await fetch(`${API_BASE}/jobs/${encodeURIComponent(jobId)}/tick`, {
-        method: 'POST',
-        headers: apiHeaders({ 'Content-Type': 'application/json' }),
-      });
-      if (!res.ok) {
-        const detail = await res.text().catch(() => res.statusText);
-        statusEl.querySelector('.job-progress-meta').textContent = `Tick error: ${res.status} ${detail.slice(0, 120)}`;
-        if (res.status === 503 || res.status === 429) {
-          appendMessage('ai', 'Generation paused (provider limit or agent unavailable). Files created so far are kept. Retry later with Continue.');
-          break;
+  try {
+    for (let i = 0; i < maxTicks; i++) {
+      let job;
+      try {
+        const res = await fetch(`${API_BASE}/jobs/${encodeURIComponent(jobId)}/tick`, {
+          method: 'POST',
+          headers: apiHeaders({ 'Content-Type': 'application/json' }),
+        });
+        if (!res.ok) {
+          const detail = await res.text().catch(() => res.statusText);
+          // Treat HTTP provider errors as pause UX, not generic agent failure
+          meta().textContent = 'Provider issue on this step…';
+          if (res.status === 429 || res.status === 502 || res.status === 503 || res.status === 504) {
+            const synthetic = {
+              status: 'paused',
+              user_message: res.status === 429
+                ? 'AI provider rate limit reached. Your project files are safe. Try Continue shortly.'
+                : 'The AI provider is temporarily unavailable. Your existing files are safe.',
+              files_created: [],
+            };
+            try {
+              const st = await fetch(`${API_BASE}/jobs/${encodeURIComponent(jobId)}`, { headers: apiHeaders() });
+              if (st.ok) Object.assign(synthetic, await st.json());
+            } catch (_) {}
+            renderPaused(synthetic);
+            return synthetic;
+          }
+          await new Promise(r => setTimeout(r, 1500));
+          continue;
         }
-        // try continue once
-        await new Promise(r => setTimeout(r, 1500));
+        job = await res.json();
+      } catch (err) {
+        meta().textContent = 'Network error — retrying…';
+        await new Promise(r => setTimeout(r, 2000));
         continue;
       }
-      job = await res.json();
-    } catch (err) {
-      statusEl.querySelector('.job-progress-meta').textContent = 'Network error: ' + err.message;
-      await new Promise(r => setTimeout(r, 2000));
-      continue;
-    }
 
-    const progress = job.progress || 0;
-    const stage = job.stage || job.status || 'running';
-    const fill = statusEl.querySelector('.job-progress-fill');
-    if (fill) fill.style.width = Math.max(2, progress) + '%';
-    const meta = stages[stage] || stage;
-    const files = (job.files_created || []).slice(0, 8).join(', ');
-    statusEl.querySelector('.job-progress-meta').textContent =
-      `${meta} (${progress}%)` + (files ? ` · ${files}` : '');
+      const progress = job.progress || 0;
+      const stage = job.stage || job.status || 'running';
+      if (fill()) fill().style.width = Math.max(2, Math.min(100, progress)) + '%';
+      const label = stages[stage] || stage;
+      const files = (job.files_created || []).slice(0, 8).join(', ');
+      meta().textContent = `${label} (${progress}%)` + (files ? ` · ${files}` : '');
 
-    if (stage !== lastStage) {
-      lastStage = stage;
-      const badge = document.querySelector('.nav-badge');
-      if (badge) badge.textContent = stage === 'completed' ? 'Ready' : ('Stage ' + Math.min(5, Math.ceil(progress / 20) || 1));
-    }
-
-    if (job.workspace_id) {
-      if (!currentWorkspace || currentWorkspace.id !== job.workspace_id) {
-        persistWorkspace({ id: job.workspace_id, name: job.workspace_id });
+      if (stage !== lastStage) {
+        lastStage = stage;
+        const badge = document.querySelector('.nav-badge');
+        if (badge) {
+          badge.textContent = stage === 'completed' ? 'Ready'
+            : ('Stage ' + Math.min(5, Math.max(1, Math.ceil((progress || 1) / 20))));
+        }
       }
-    }
-    try { loadFileTree(); } catch (_) {}
-    try { maybeAutoPreview(); } catch (_) {}
 
-    if (job.status === 'completed') {
-      statusEl.querySelector('.job-progress-meta').textContent = 'Completed (100%)';
-      if (fill) fill.style.width = '100%';
-      appendMessage('ai', job.response || ('Project generation completed. Files: ' + (job.files_created || []).join(', ')));
-      try { localStorage.removeItem('lumora_active_job'); } catch (_) {}
-      return job;
+      if (job.workspace_id) {
+        if (!currentWorkspace || currentWorkspace.id !== job.workspace_id) {
+          persistWorkspace({ id: job.workspace_id, name: job.workspace_id });
+        }
+      }
+      try { loadFileTree(); } catch (_) {}
+      try { maybeAutoPreview(); } catch (_) {}
+
+      if (job.status === 'completed') {
+        renderCompleted(job);
+        return job;
+      }
+      if (job.status === 'paused') {
+        renderPaused(job);
+        return job;
+      }
+      if (job.status === 'failed') {
+        meta().textContent = 'Failed: ' + (job.user_message || job.error || 'unknown');
+        appendMessage('ai', '**Build failed.**\n\n' + (job.user_message || job.error || '') +
+          '\n\nExisting files were kept: ' + (job.files_created || []).join(', '));
+        return job;
+      }
+      await new Promise(r => setTimeout(r, 400));
     }
-    if (job.status === 'paused' || job.status === 'failed') {
-      appendMessage('ai', 'Generation ' + job.status + (job.error ? (': ' + job.error) : '') +
-        '\\n\\nYou can continue later. Files so far: ' + (job.files_created || []).join(', '));
-      return job;
-    }
-    // brief pause between ticks
-    await new Promise(r => setTimeout(r, 400));
+    appendMessage('ai', 'Generation still in progress after several stages. Open **Files** to review, or send **continue**.');
+    return null;
+  } finally {
+    if (window.__lumoraJobDriving === jobId) window.__lumoraJobDriving = null;
   }
-  appendMessage('ai', 'Generation still running after max ticks. Open Files to see progress, or send "continue".');
-  return null;
 }
 
 // Resume active job after refresh

@@ -563,7 +563,7 @@ def get_job(job_id: str):
     job = jobs_mod.load_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-    # Strip heavy message payload for light polls unless ?full=1
+    # Strip heavy message payload for light polls
     return {
         "id": job.get("id"),
         "status": job.get("status"),
@@ -573,6 +573,9 @@ def get_job(job_id: str):
         "response": job.get("response") or "",
         "error": job.get("error") or "",
         "reason": job.get("reason") or "",
+        "user_message": job.get("user_message") or "",
+        "retryable": bool(job.get("retryable", True)),
+        "error_category": job.get("error_category") or "",
         "files_created": job.get("files_created") or [],
         "workspace_id": job.get("workspace_id") or "",
         "tick_count": job.get("tick_count") or 0,
@@ -644,7 +647,10 @@ def jobs_tick(job_id: str):
     """
     Run one bounded LangGraph slice for the job. Designed for Vercel:
     each invocation should finish well under maxDuration.
+    Concurrent ticks for the same job are rejected while locked.
     """
+    import time as _time
+
     if _agent is None:
         raise HTTPException(status_code=503, detail="Agent is not initialised yet")
     job = jobs_mod.load_job(job_id)
@@ -652,16 +658,29 @@ def jobs_tick(job_id: str):
         raise HTTPException(status_code=404, detail="Job not found")
     if job.get("status") == "completed":
         return get_job(job_id)
+    if job.get("status") == "failed":
+        return get_job(job_id)
+
+    # Simple lock to prevent duplicate simultaneous ticks
+    now = _time.time()
+    locked_until = float(job.get("locked_until") or 0)
+    if locked_until > now and job.get("status") == "running":
+        return get_job(job_id)
+
+    job["locked_until"] = now + 55
+    jobs_mod.save_job(job)
 
     try:
         updated = jobs_mod.run_job_tick(_agent, job, max_steps=4, time_budget_s=45.0)
+        updated["locked_until"] = 0
+        jobs_mod.save_job(updated)
     except Exception as exc:
         logger.exception("Job tick failed")
-        job["status"] = "paused"
-        job["reason"] = "tick_error"
-        job["error"] = str(exc)
+        job = jobs_mod.load_job(job_id) or job
+        job = jobs_mod.apply_pause(job, exc)
+        job["locked_until"] = 0
         jobs_mod.save_job(job)
-        raise HTTPException(status_code=502, detail=f"Tick failed: {exc}") from exc
+        return get_job(job_id)
 
     add_activity(
         "coordinator",
